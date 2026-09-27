@@ -155,6 +155,7 @@
     .rank strong { text-align: right; font-variant-numeric: tabular-nums; }
     .rank strong span { display: block; margin-top: 2px; }
     .rank.total { border-color: var(--orange); }
+    .total-zone { margin-top: 28px; }
     .orders { display: grid; gap: 8px; }
     .order {
       display: flex;
@@ -812,6 +813,25 @@
         <div class="menus">${menus}</div>`;
     }
 
+    function dayTotals(day) {
+      let menuQty = 0;
+      let menuAmount = 0;
+      let coverQty = 0;
+      let coverAmount = 0;
+      ordersOn(day).forEach((order) => {
+        order.items.forEach((item) => {
+          if (item.menuId === COVER_ID) {
+            coverQty += item.qty;
+            coverAmount += item.amount;
+            return;
+          }
+          menuQty += item.qty;
+          menuAmount += item.amount;
+        });
+      });
+      return { menuQty, menuAmount, coverQty, coverAmount };
+    }
+
     function renderStats(day) {
       const counts = menuStats(day);
       const rows = CATEGORIES.map((cat) => {
@@ -831,32 +851,25 @@
             <article class="rank"><b>${esc(row.label)}</b><strong>${row.qty}개<span>${won(row.amount)}</span></strong></article>
           `).join("")}</div>`;
       }).join("");
-      const orders = ordersOn(day);
-      let menuQty = 0;
-      let menuAmount = 0;
-      let coverQty = 0;
-      let coverAmount = 0;
-      orders.forEach((order) => {
-        order.items.forEach((item) => {
-          if (item.menuId === COVER_ID) {
-            coverQty += item.qty;
-            coverAmount += item.amount;
-            return;
-          }
-          menuQty += item.qty;
-          menuAmount += item.amount;
-        });
-      });
+      const totals = dayTotals(day);
       return `
         <h2 class="done-head">메뉴별 판매</h2>
         ${rows}
         <h3 class="done-head">상차림비</h3>
         <div class="ranks">
-          <article class="rank"><b>상차림비</b><strong>${coverQty}개<span>${won(coverAmount)}</span></strong></article>
-        </div>
-        <div class="ranks" style="margin-top:10px">
-          <article class="rank total"><b>합계</b><strong>${menuQty + coverQty}개<span>${won(menuAmount + coverAmount)}</span></strong></article>
+          <article class="rank"><b>상차림비</b><strong>${totals.coverQty}개<span>${won(totals.coverAmount)}</span></strong></article>
         </div>`;
+    }
+
+    function renderTotal(day) {
+      const totals = dayTotals(day);
+      return `
+        <section class="panel total-zone">
+          <h2>합계</h2>
+          <div class="ranks" style="margin-top:10px">
+            <article class="rank total"><b>합계</b><strong>${totals.menuQty + totals.coverQty}개<span>${won(totals.menuAmount + totals.coverAmount)}</span></strong></article>
+          </div>
+        </section>`;
     }
 
     function renderOrders(day) {
@@ -919,6 +932,7 @@
           ${renderMenus()}
           ${renderStats(day)}
           ${renderOrders(day)}
+          ${renderTotal(day)}
           <section class="panel danger-zone">
             <h3>데이터 초기화</h3>
             <p class="quiet" style="margin:8px 0 14px">고른 일차의 접수만 삭제됩니다.</p>
