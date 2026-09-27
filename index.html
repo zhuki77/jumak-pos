@@ -57,15 +57,17 @@
     .sync { margin: 4px 0 0; color: var(--muted); font-size: .82rem; font-weight: 800; }
     #clock { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 700; }
     .tabs { display: flex; gap: 8px; margin-top: 12px; }
-    .tabs button {
+    .tabs button, .filters button {
       flex: 1;
       min-height: 52px;
       border: 0;
       border-radius: 14px;
       background: #2a3140;
       font-weight: 800;
+      line-height: 1.25;
+      padding: 8px 6px;
     }
-    .tabs button.on { background: var(--orange); color: var(--orange-ink); }
+    .tabs button.on, .filters button.on { background: var(--orange); color: var(--orange-ink); }
     .cover-btn {
       display: flex;
       width: 100%;
@@ -119,8 +121,10 @@
     }
     .menu.picked { border-color: var(--orange); }
     .menu-main { width: 100%; min-height: 88px; padding: 0; background: transparent; text-align: left; }
-    .menu-main strong, .menu-main b, .desc { display: block; }
-    .menu-main b { margin-top: 6px; color: var(--orange); }
+    .menu-copy strong, .menu-copy b, .desc { display: block; }
+    .menu-copy b, .price { margin-top: 6px; color: var(--orange); }
+    .menu-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .menu-line + .menu-line { margin-top: 10px; }
     .desc { margin-top: 4px; font-size: .82rem; font-weight: 700; }
     .opts { display: grid; gap: 8px; margin-top: 8px; }
     .opts button { min-height: 48px; border: 0; border-radius: 12px; background: #2a3348; color: white; font-weight: 800; }
@@ -156,6 +160,42 @@
     .rank strong span { display: block; margin-top: 2px; }
     .rank.total { border-color: var(--orange); }
     .total-zone { margin-top: 28px; }
+    .filters { display: flex; gap: 8px; margin-top: 4px; }
+    .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+    .summary article, .minute, .order-card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+    }
+    .summary span, .minute span { color: var(--muted); font-size: .82rem; font-weight: 800; }
+    .summary strong { display: block; margin-top: 6px; font-size: 1.35rem; }
+    .minute-list, .order-list { display: grid; gap: 10px; }
+    .minute { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .minute b { font-size: 1.05rem; }
+    .note-field { display: grid; gap: 8px; margin-top: 14px; font-weight: 800; }
+    .note-field textarea {
+      min-height: 76px;
+      border-radius: 12px;
+      border: 2px solid var(--line);
+      background: #121722;
+      color: inherit;
+      padding: 12px;
+      resize: vertical;
+    }
+    .toggle-btn {
+      width: 100%;
+      min-height: 52px;
+      margin-top: 8px;
+      border: 0;
+      border-radius: 14px;
+      background: #2a3140;
+      font-weight: 800;
+    }
+    .order-card { display: grid; gap: 8px; }
+    .order-head, .order-sum { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .order-card ul { margin: 0; padding-left: 18px; }
+    .order-card li { margin: 4px 0; }
     .orders { display: grid; gap: 8px; }
     .order {
       display: flex;
@@ -275,7 +315,11 @@
       day: "",
       cat: "skewer",
       optionFor: "",
+      screen: "order",
+      statsRange: "all",
+      detailsOpen: false,
       drafts: { "2026-10-01": [], "2026-10-02": [] },
+      notes: { "2026-10-01": "", "2026-10-02": "" },
       confirm: null
     };
 
@@ -306,7 +350,8 @@
     }
 
     function hhmm(ts) {
-      return new Date(ts).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+      const date = new Date(ts);
+      return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
     }
 
     function esc(value) {
@@ -355,6 +400,8 @@
             id: op.id,
             day: op.day,
             at: op.at,
+            seq: op.seq || 0,
+            note: op.note || "",
             items,
             total: items.reduce((sum, item) => sum + (item.amount || 0), 0)
           });
@@ -464,9 +511,30 @@
       return text;
     }
 
+    function encodeNote(note) {
+      return encodeURIComponent(String(note || "").slice(0, 80));
+    }
+
+    function decodeNote(value) {
+      try { return decodeURIComponent(value || ""); } catch (err) { return ""; }
+    }
+
+    function parseItems(text) {
+      return String(text || "").split(";").filter(Boolean).map((row) => {
+        const cols = row.split(",");
+        return {
+          menuId: cols[0],
+          qty: Number(cols[1]) || 0,
+          amount: Number(cols[2]) || 0,
+          option: cols.slice(3).join(",")
+        };
+      });
+    }
+
     function serialize(op) {
       if (op.kind === "O") {
         const items = op.items.map((item) => [item.menuId, item.qty, item.amount, item.option || ""].join(",")).join(";");
+        if (op.seq || op.note) return ["O2", op.day, op.at, op.seq || 0, encodeNote(op.note), items].join("|");
         return ["O", op.day, op.at, items].join("|");
       }
       if (op.kind === "X") return ["X", op.orderId].join("|");
@@ -477,17 +545,18 @@
 
     function parseOp(text) {
       const parts = String(text || "").split("|");
+      if (parts[0] === "O2") {
+        return {
+          kind: "O",
+          day: parts[1],
+          at: Number(parts[2]) || 0,
+          seq: Number(parts[3]) || 0,
+          note: decodeNote(parts[4]),
+          items: parseItems(parts.slice(5).join("|"))
+        };
+      }
       if (parts[0] === "O") {
-        const items = (parts.slice(3).join("|") || "").split(";").filter(Boolean).map((row) => {
-          const cols = row.split(",");
-          return {
-            menuId: cols[0],
-            qty: Number(cols[1]) || 0,
-            amount: Number(cols[2]) || 0,
-            option: cols.slice(3).join(",")
-          };
-        });
-        return { kind: "O", day: parts[1], at: Number(parts[2]) || 0, items };
+        return { kind: "O", day: parts[1], at: Number(parts[2]) || 0, seq: 0, note: "", items: parseItems(parts.slice(3).join("|")) };
       }
       if (parts[0] === "X") return { kind: "X", orderId: parts[1] };
       if (parts[0] === "D") return { kind: "D", day: parts[1] };
@@ -601,7 +670,7 @@
       state = replay(localOps);
       saveLocal();
       syncLabel = "다른 기기와 연결됨";
-      const typing = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.amount;
+      const typing = document.activeElement && document.activeElement.dataset && (document.activeElement.dataset.amount || document.activeElement.dataset.note !== undefined);
       if (!typing && before !== JSON.stringify(state.orders)) render();
       else paintSync();
     }
@@ -679,6 +748,27 @@
       if (!custom) line.amount = line.price * line.qty;
     }
 
+    function nextSeq(day) {
+      let max = 0;
+      localOps.forEach((op) => {
+        if (!op) return;
+        if (op.kind === "R" || (op.kind === "D" && op.day === day)) max = 0;
+        if (op.kind === "O" && op.day === day) max = Math.max(max, op.seq || 0);
+      });
+      return max + 1;
+    }
+
+    function orderNo(order) {
+      if (order.seq) return String(order.seq).padStart(3, "0");
+      const same = state.orders.filter((item) => item.day === order.day).slice().sort((a, b) => a.at - b.at);
+      return String(Math.max(1, same.findIndex((item) => item.id === order.id) + 1)).padStart(3, "0");
+    }
+
+    function dayLabel(key) {
+      const found = FESTIVAL_DAYS.find((item) => item.key === key);
+      return found ? found.label : "";
+    }
+
     function submitOrder() {
       const draft = currentDraft().filter((line) => line.qty > 0);
       if (!draft.length) return;
@@ -689,11 +779,13 @@
         amount: Number(line.amount) || 0,
         option: line.option || ""
       }));
-      commit({ kind: "O", id: uid(), day, at: Date.now(), items });
+      const note = String(ui.notes[day] || "").trim().slice(0, 80);
+      commit({ kind: "O", id: uid(), day, at: Date.now(), seq: nextSeq(day), note, items });
       ui.drafts[day] = [];
+      ui.notes[day] = "";
       ui.confirm = null;
       const total = items.reduce((sum, item) => sum + item.amount, 0);
-      toast(`${FESTIVAL_DAYS.find((item) => item.key === day).label}에 ${won(total)}을 접수했습니다.`);
+      toast(`${dayLabel(day)}에 ${won(total)}을 접수했습니다.`);
       render();
     }
 
@@ -708,15 +800,16 @@
       localOps = localOps.filter((op) => syncedSet.has(op.id) || op.kind !== "O" || op.day !== day);
       commit({ kind: "D", id: uid(), day });
       ui.drafts[day] = [];
+      ui.notes[day] = "";
       ui.confirm = null;
-      const label = FESTIVAL_DAYS.find((item) => item.key === day).label;
+      const label = dayLabel(day);
       toast(`${label} 접수를 초기화했습니다.`);
       render();
     }
 
-    function menuStats(day) {
+    function menuStats(orders) {
       const map = new Map();
-      ordersOn(day).forEach((order) => {
+      orders.forEach((order) => {
         order.items.forEach((item) => {
           const key = lineKey(item.menuId, item.option);
           const prev = map.get(key) || { qty: 0, amount: 0 };
@@ -728,8 +821,47 @@
       return map;
     }
 
+    function sumOrders(orders) {
+      let menuQty = 0;
+      let menuAmount = 0;
+      let coverQty = 0;
+      let coverAmount = 0;
+      orders.forEach((order) => {
+        order.items.forEach((item) => {
+          if (item.menuId === COVER_ID) {
+            coverQty += item.qty;
+            coverAmount += item.amount;
+            return;
+          }
+          menuQty += item.qty;
+          menuAmount += item.amount;
+        });
+      });
+      return { menuQty, menuAmount, coverQty, coverAmount, revenue: menuAmount + coverAmount, count: orders.length };
+    }
+
+    function rangeOrders() {
+      if (ui.statsRange === "all") return state.orders.slice();
+      return ordersOn(ui.statsRange);
+    }
+
+    function qtyOf(menuId, option) {
+      const line = currentDraft().find((item) => item.key === lineKey(menuId, option || ""));
+      return line ? line.qty : 0;
+    }
+
+    function menuStepper(menuId, option, label) {
+      return `
+        <span class="stepper">
+          <button type="button" data-action="dec-menu" data-id="${esc(menuId)}" data-option="${esc(option || "")}" aria-label="${esc(label)} 수량 줄이기">−</button>
+          <b>${qtyOf(menuId, option)}</b>
+          <button type="button" data-action="inc-menu" data-id="${esc(menuId)}" data-option="${esc(option || "")}" aria-label="${esc(label)} 수량 늘리기">+</button>
+        </span>`;
+    }
+
     function renderHeader() {
       const day = activeDay();
+      const ordering = ui.screen !== "stats";
       return `
         <header class="top">
           <div class="wrap">
@@ -741,12 +873,13 @@
               </div>
               <time id="clock">${esc(hhmm(Date.now()))}</time>
             </div>
-            <div class="tabs" role="tablist" aria-label="일차">
+            <div class="tabs" role="tablist" aria-label="화면">
               ${FESTIVAL_DAYS.map((item) => `
-                <button type="button" data-action="set-day" data-day="${item.key}" class="${item.key === day ? "on" : ""}">${item.label}${item.key === dayKey(Date.now()) ? " · 오늘" : ""}</button>
+                <button type="button" data-action="set-day" data-day="${item.key}" class="${ordering && item.key === day ? "on" : ""}">${item.label} 주문 입력</button>
               `).join("")}
+              <button type="button" data-action="open-stats" class="${ordering ? "" : "on"}">주문 내역 & 통계</button>
             </div>
-            ${renderCover()}
+            ${ordering ? renderCover() : ""}
           </div>
         </header>`;
     }
@@ -789,21 +922,25 @@
     }
 
     function renderMenus() {
-      const draft = currentDraft();
       const menus = MENU.filter((menu) => menu.cat === ui.cat).map((menu) => {
-        const picked = draft.some((line) => line.menuId === menu.id);
-        const options = menu.options && ui.optionFor === menu.id
-          ? `<div class="opts">${menu.options.map((opt) => `<button type="button" data-action="pick-option" data-id="${menu.id}" data-option="${esc(opt)}">${esc(opt)}</button>`).join("")}</div>`
-          : "";
+        const lines = menu.options
+          ? menu.options.map((opt) => `
+              <div class="menu-line">
+                <span>${esc(opt)}</span>
+                ${menuStepper(menu.id, opt, `${menu.name} ${opt}`)}
+              </div>`).join("")
+          : `<div class="menu-line">${menuStepper(menu.id, "", menu.name)}</div>`;
+        const picked = menu.options
+          ? menu.options.some((opt) => qtyOf(menu.id, opt) > 0)
+          : qtyOf(menu.id, "") > 0;
         return `
           <article class="menu ${picked ? "picked" : ""}">
-            <button type="button" class="menu-main" data-action="add-item" data-id="${menu.id}">
+            <div class="menu-copy">
               <strong>${esc(menu.name)}</strong>
               ${menu.desc ? `<span class="desc">${esc(menu.desc)}</span>` : ""}
               <b>${won(menu.price)}</b>
-              <span class="desc">${menu.options ? (ui.optionFor === menu.id ? "종류 닫기" : "종류를 눌러 담기") : "눌러서 담기"}</span>
-            </button>
-            ${options}
+            </div>
+            ${lines}
           </article>`;
       }).join("");
       return `
@@ -813,28 +950,18 @@
         <div class="menus">${menus}</div>`;
     }
 
-    function dayTotals(day) {
-      let menuQty = 0;
-      let menuAmount = 0;
-      let coverQty = 0;
-      let coverAmount = 0;
-      ordersOn(day).forEach((order) => {
-        order.items.forEach((item) => {
-          if (item.menuId === COVER_ID) {
-            coverQty += item.qty;
-            coverAmount += item.amount;
-            return;
-          }
-          menuQty += item.qty;
-          menuAmount += item.amount;
-        });
-      });
-      return { menuQty, menuAmount, coverQty, coverAmount };
+    function renderNote() {
+      const day = activeDay();
+      return `
+        <label class="note-field">
+          요청사항
+          <textarea data-note maxlength="80" placeholder="없으면 비워 두세요">${esc(ui.notes[day] || "")}</textarea>
+        </label>`;
     }
 
-    function renderStats(day) {
-      const counts = menuStats(day);
-      const rows = CATEGORIES.map((cat) => {
+    function renderMenuRows(orders) {
+      const counts = menuStats(orders);
+      return CATEGORIES.map((cat) => {
         const items = MENU.filter((menu) => menu.cat === cat.id).flatMap((menu) => {
           if (menu.options) {
             return menu.options.map((opt) => {
@@ -851,41 +978,83 @@
             <article class="rank"><b>${esc(row.label)}</b><strong>${row.qty}개<span>${won(row.amount)}</span></strong></article>
           `).join("")}</div>`;
       }).join("");
-      const totals = dayTotals(day);
+    }
+
+    function renderMinutes(orders) {
+      const groups = new Map();
+      orders.forEach((order) => {
+        const stamp = hhmm(order.at);
+        const key = ui.statsRange === "all" ? `${order.day} ${stamp}` : stamp;
+        const prev = groups.get(key) || { label: ui.statsRange === "all" ? `${dayLabel(order.day)} ${stamp}` : stamp, count: 0, amount: 0, sort: `${order.day} ${stamp}` };
+        prev.count += 1;
+        prev.amount += order.total;
+        groups.set(key, prev);
+      });
+      const rows = [...groups.values()].sort((a, b) => a.sort.localeCompare(b.sort));
+      if (!rows.length) return `<p class="quiet">이 구간에 접수한 주문이 없습니다.</p>`;
+      return `<div class="minute-list">${rows.map((row) => `
+        <article class="minute"><b>${esc(row.label)}</b><span>${row.count}건 · ${won(row.amount)}</span></article>
+      `).join("")}</div>`;
+    }
+
+    function renderOrderCards(orders) {
+      const list = orders.slice().sort((a, b) => b.at - a.at);
+      if (!list.length) return `<p class="quiet">접수한 주문이 없습니다.</p>`;
+      return `<div class="order-list">${list.map((order) => `
+        <article class="order-card">
+          <div class="order-head">
+            <strong>[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} - ${esc(hhmm(order.at))}</strong>
+          </div>
+          <ul>${order.items.map((item) => `<li>${esc(itemLabel(item))} ${item.qty}개 · ${won(item.amount)}</li>`).join("")}</ul>
+          ${order.note ? `<p>요청사항: ${esc(order.note)}</p>` : `<p class="quiet">요청사항 없음</p>`}
+          <div class="order-sum"><b>총금액 ${won(order.total)}</b>
+            <button type="button" class="text-btn" data-action="ask-cancel" data-id="${esc(order.id)}">주문 취소</button>
+          </div>
+        </article>`).join("")}</div>`;
+    }
+
+    function renderStatsScreen() {
+      const orders = rangeOrders();
+      const totals = sumOrders(orders);
+      const filters = [
+        { id: "2026-10-01", label: "1일차" },
+        { id: "2026-10-02", label: "2일차" },
+        { id: "all", label: "이틀 전체" }
+      ];
       return `
+        <h2>주문 내역 & 통계</h2>
+        <div class="filters" role="tablist" aria-label="통계 기간">
+          ${filters.map((item) => `<button type="button" data-action="set-range" data-range="${item.id}" class="${ui.statsRange === item.id ? "on" : ""}">${item.label}</button>`).join("")}
+        </div>
+        <div class="summary">
+          <article><span>총 매출액</span><strong>${won(totals.revenue)}</strong></article>
+          <article><span>총 주문 건수</span><strong>${totals.count}건</strong></article>
+        </div>
         <h2 class="done-head">메뉴별 판매</h2>
-        ${rows}
+        ${renderMenuRows(orders)}
         <h3 class="done-head">상차림비</h3>
         <div class="ranks">
           <article class="rank"><b>상차림비</b><strong>${totals.coverQty}개<span>${won(totals.coverAmount)}</span></strong></article>
-        </div>`;
-    }
-
-    function renderTotal(day) {
-      const totals = dayTotals(day);
-      return `
+        </div>
+        <h2 class="done-head">시간대별 주문</h2>
+        <p class="quiet">1분 단위 매출과 주문 건수입니다.</p>
+        ${renderMinutes(orders)}
+        <h2 class="done-head">상세 주문</h2>
+        <button type="button" class="toggle-btn" data-action="toggle-details">${ui.detailsOpen ? "상세 주문 현황 접기" : "상세 주문 현황 보기"}</button>
+        ${ui.detailsOpen ? renderOrderCards(orders) : ""}
+        <section class="panel danger-zone">
+          <h3>데이터 초기화</h3>
+          <p class="quiet" style="margin:8px 0 14px">고른 일차의 접수만 삭제됩니다.</p>
+          <div class="reset-row">
+            ${FESTIVAL_DAYS.map((item) => `<button type="button" class="danger-btn" data-action="ask-reset" data-day="${item.key}">${item.label} 초기화</button>`).join("")}
+          </div>
+        </section>
         <section class="panel total-zone">
           <h2>합계</h2>
           <div class="ranks" style="margin-top:10px">
-            <article class="rank total"><b>합계</b><strong>${totals.menuQty + totals.coverQty}개<span>${won(totals.menuAmount + totals.coverAmount)}</span></strong></article>
+            <article class="rank total"><b>합계</b><strong>${totals.menuQty + totals.coverQty}개<span>${won(totals.revenue)}</span></strong></article>
           </div>
         </section>`;
-    }
-
-    function renderOrders(day) {
-      const orders = ordersOn(day).slice().sort((a, b) => b.at - a.at);
-      if (!orders.length) return "";
-      return `
-        <h3 class="done-head">접수한 주문</h3>
-        <section class="panel orders">${orders.map((order) => {
-          const name = order.items[0] ? itemLabel(order.items[0]) : "주문";
-          const extra = order.items.length > 1 ? ` 외 ${order.items.length - 1}` : "";
-          return `
-            <article class="order">
-              <span>${esc(hhmm(order.at))} · ${esc(name + extra)}<br><strong>${won(order.total)}</strong></span>
-              <button type="button" class="text-btn" data-action="ask-cancel" data-id="${esc(order.id)}">취소</button>
-            </article>`;
-        }).join("")}</section>`;
     }
 
     function renderConfirm() {
@@ -923,25 +1092,19 @@
       const day = activeDay();
       ui.day = day;
       const meta = FESTIVAL_DAYS.find((item) => item.key === day);
+      const ordering = ui.screen !== "stats";
       document.getElementById("app").innerHTML = `
         ${renderHeader()}
         <main class="wrap">
-          <h2>${esc(meta.label)} 주문</h2>
-          <p class="quiet">${esc(dayTitle(day))} · 할인은 금액을 고치고, 무료는 0원입니다.</p>
-          ${renderCart()}
-          ${renderMenus()}
-          ${renderStats(day)}
-          ${renderOrders(day)}
-          ${renderTotal(day)}
-          <section class="panel danger-zone">
-            <h3>데이터 초기화</h3>
-            <p class="quiet" style="margin:8px 0 14px">고른 일차의 접수만 삭제됩니다.</p>
-            <div class="reset-row">
-              ${FESTIVAL_DAYS.map((item) => `<button type="button" class="danger-btn" data-action="ask-reset" data-day="${item.key}">${item.label} 초기화</button>`).join("")}
-            </div>
-          </section>
+          ${ordering ? `
+            <h2>${esc(meta.label)} 주문 입력</h2>
+            <p class="quiet">${esc(dayTitle(day))} · 할인은 금액을 고치고, 무료는 0원입니다.</p>
+            ${renderMenus()}
+            ${renderCart()}
+            ${renderNote()}
+          ` : renderStatsScreen()}
         </main>
-        ${renderDock()}
+        ${ordering ? renderDock() : ""}
         ${renderConfirm()}`;
       document.body.classList.toggle("modal-open", Boolean(ui.confirm));
     }
@@ -952,8 +1115,25 @@
       const action = btn.dataset.action;
       if (action === "set-day") {
         ui.day = btn.dataset.day;
+        ui.screen = "order";
         ui.optionFor = "";
         ui.confirm = null;
+        render();
+      } else if (action === "open-stats") {
+        ui.screen = "stats";
+        ui.confirm = null;
+        render();
+      } else if (action === "set-range") {
+        ui.statsRange = btn.dataset.range;
+        render();
+      } else if (action === "toggle-details") {
+        ui.detailsOpen = !ui.detailsOpen;
+        render();
+      } else if (action === "inc-menu") {
+        addLine(btn.dataset.id, btn.dataset.option || "");
+        render();
+      } else if (action === "dec-menu") {
+        changeQty(lineKey(btn.dataset.id, btn.dataset.option || ""), -1);
         render();
       } else if (action === "set-cat") {
         ui.cat = btn.dataset.cat;
@@ -998,9 +1178,9 @@
       } else if (action === "ask-cancel") {
         const orderId = btn.dataset.id;
         ui.confirm = {
-          title: "접수 취소",
-          message: "이 접수를 취소하면 수량과 금액이 함께 빠집니다.",
-          yes: "접수 취소",
+          title: "주문 취소",
+          message: "이 주문을 취소하시겠습니까?",
+          yes: "주문 취소",
           danger: true,
           run: () => cancelOrder(orderId)
         };
@@ -1031,6 +1211,11 @@
     }
 
     function onAmount(event) {
+      const note = event.target.closest("[data-note]");
+      if (note) {
+        ui.notes[activeDay()] = String(note.value || "").slice(0, 80);
+        return;
+      }
       const input = event.target.closest("[data-amount]");
       if (!input) return;
       const digits = String(input.value).replace(/[^\d]/g, "");
