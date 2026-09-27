@@ -160,7 +160,7 @@
     .rank strong span { display: block; margin-top: 2px; }
     .rank.total { border-color: var(--orange); }
     .total-zone { margin-top: 28px; }
-    .filters { display: flex; gap: 8px; margin-top: 4px; }
+    .filters { display: flex; gap: 8px; margin-top: 8px; }
     .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
     .summary article, .minute, .order-card {
       background: var(--card);
@@ -183,15 +183,17 @@
       padding: 12px;
       resize: vertical;
     }
-    .toggle-btn {
-      width: 100%;
-      min-height: 52px;
-      margin-top: 8px;
+    .pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
+    .pager button {
+      min-height: 48px;
+      min-width: 84px;
       border: 0;
-      border-radius: 14px;
+      border-radius: 12px;
       background: #2a3140;
       font-weight: 800;
     }
+    .pager button:disabled { opacity: .35; }
+    .pager span { font-weight: 800; font-variant-numeric: tabular-nums; }
     .order-card { display: grid; gap: 8px; }
     .order-head, .order-sum { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
     .order-card ul { margin: 0; padding-left: 18px; }
@@ -317,7 +319,8 @@
       optionFor: "",
       screen: "order",
       statsRange: "all",
-      detailsOpen: false,
+      minutePage: 0,
+      orderPage: 0,
       drafts: { "2026-10-01": [], "2026-10-02": [] },
       notes: { "2026-10-01": "", "2026-10-02": "" },
       confirm: null
@@ -861,7 +864,7 @@
 
     function renderHeader() {
       const day = activeDay();
-      const ordering = ui.screen !== "stats";
+      const ordering = ui.screen === "order";
       return `
         <header class="top">
           <div class="wrap">
@@ -980,7 +983,55 @@
       }).join("");
     }
 
-    function renderMinutes(orders) {
+    const PAGE_SIZE = 20;
+
+    function renderHistoryNav() {
+      const pages = [
+        { id: "stats", label: "통계" },
+        { id: "minutes", label: "시간대별" },
+        { id: "orders", label: "상세 주문" }
+      ];
+      return `
+        <div class="filters" role="tablist" aria-label="내역 화면">
+          ${pages.map((item) => `<button type="button" data-action="open-history" data-screen="${item.id}" class="${ui.screen === item.id ? "on" : ""}">${item.label}</button>`).join("")}
+        </div>`;
+    }
+
+    function renderRangeFilters() {
+      const filters = [
+        { id: "2026-10-01", label: "1일차" },
+        { id: "2026-10-02", label: "2일차" },
+        { id: "all", label: "이틀 전체" }
+      ];
+      return `
+        <div class="filters" role="tablist" aria-label="통계 기간">
+          ${filters.map((item) => `<button type="button" data-action="set-range" data-range="${item.id}" class="${ui.statsRange === item.id ? "on" : ""}">${item.label}</button>`).join("")}
+        </div>`;
+    }
+
+    function pageWindow(total, page) {
+      const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+      const current = Math.min(Math.max(0, page), pages - 1);
+      return {
+        current,
+        pages,
+        start: current * PAGE_SIZE,
+        end: Math.min(total, (current + 1) * PAGE_SIZE)
+      };
+    }
+
+    function renderPager(kind, total, page) {
+      if (total <= PAGE_SIZE) return "";
+      const windowed = pageWindow(total, page);
+      return `
+        <div class="pager">
+          <button type="button" data-action="page" data-page-kind="${kind}" data-delta="-1" ${windowed.current <= 0 ? "disabled" : ""}>이전</button>
+          <span>${windowed.start + 1}–${windowed.end} / ${total}</span>
+          <button type="button" data-action="page" data-page-kind="${kind}" data-delta="1" ${windowed.current >= windowed.pages - 1 ? "disabled" : ""}>다음</button>
+        </div>`;
+    }
+
+    function minuteRows(orders) {
       const groups = new Map();
       orders.forEach((order) => {
         const stamp = hhmm(order.at);
@@ -990,42 +1041,50 @@
         prev.amount += order.total;
         groups.set(key, prev);
       });
-      const rows = [...groups.values()].sort((a, b) => a.sort.localeCompare(b.sort));
+      return [...groups.values()].sort((a, b) => a.sort.localeCompare(b.sort));
+    }
+
+    function renderMinutes(orders) {
+      const rows = minuteRows(orders);
       if (!rows.length) return `<p class="quiet">이 구간에 접수한 주문이 없습니다.</p>`;
-      return `<div class="minute-list">${rows.map((row) => `
-        <article class="minute"><b>${esc(row.label)}</b><span>${row.count}건 · ${won(row.amount)}</span></article>
-      `).join("")}</div>`;
+      const windowed = pageWindow(rows.length, ui.minutePage);
+      ui.minutePage = windowed.current;
+      const visible = rows.slice(windowed.start, windowed.end);
+      return `
+        <div class="minute-list">${visible.map((row) => `
+          <article class="minute"><b>${esc(row.label)}</b><span>${row.count}건 · ${won(row.amount)}</span></article>
+        `).join("")}</div>
+        ${renderPager("minute", rows.length, windowed.current)}`;
     }
 
     function renderOrderCards(orders) {
       const list = orders.slice().sort((a, b) => b.at - a.at);
       if (!list.length) return `<p class="quiet">접수한 주문이 없습니다.</p>`;
-      return `<div class="order-list">${list.map((order) => `
-        <article class="order-card">
-          <div class="order-head">
-            <strong>[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} - ${esc(hhmm(order.at))}</strong>
-          </div>
-          <ul>${order.items.map((item) => `<li>${esc(itemLabel(item))} ${item.qty}개 · ${won(item.amount)}</li>`).join("")}</ul>
-          ${order.note ? `<p>요청사항: ${esc(order.note)}</p>` : `<p class="quiet">요청사항 없음</p>`}
-          <div class="order-sum"><b>총금액 ${won(order.total)}</b>
-            <button type="button" class="text-btn" data-action="ask-cancel" data-id="${esc(order.id)}">주문 취소</button>
-          </div>
-        </article>`).join("")}</div>`;
+      const windowed = pageWindow(list.length, ui.orderPage);
+      ui.orderPage = windowed.current;
+      const visible = list.slice(windowed.start, windowed.end);
+      return `
+        <div class="order-list">${visible.map((order) => `
+          <article class="order-card">
+            <div class="order-head">
+              <strong>[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} - ${esc(hhmm(order.at))}</strong>
+            </div>
+            <ul>${order.items.map((item) => `<li>${esc(itemLabel(item))} ${item.qty}개 · ${won(item.amount)}</li>`).join("")}</ul>
+            ${order.note ? `<p>요청사항: ${esc(order.note)}</p>` : `<p class="quiet">요청사항 없음</p>`}
+            <div class="order-sum"><b>총금액 ${won(order.total)}</b>
+              <button type="button" class="text-btn" data-action="ask-cancel" data-id="${esc(order.id)}">주문 취소</button>
+            </div>
+          </article>`).join("")}</div>
+        ${renderPager("order", list.length, windowed.current)}`;
     }
 
     function renderStatsScreen() {
       const orders = rangeOrders();
       const totals = sumOrders(orders);
-      const filters = [
-        { id: "2026-10-01", label: "1일차" },
-        { id: "2026-10-02", label: "2일차" },
-        { id: "all", label: "이틀 전체" }
-      ];
       return `
         <h2>주문 내역 & 통계</h2>
-        <div class="filters" role="tablist" aria-label="통계 기간">
-          ${filters.map((item) => `<button type="button" data-action="set-range" data-range="${item.id}" class="${ui.statsRange === item.id ? "on" : ""}">${item.label}</button>`).join("")}
-        </div>
+        ${renderHistoryNav()}
+        ${renderRangeFilters()}
         <div class="summary">
           <article><span>총 매출액</span><strong>${won(totals.revenue)}</strong></article>
           <article><span>총 주문 건수</span><strong>${totals.count}건</strong></article>
@@ -1036,12 +1095,6 @@
         <div class="ranks">
           <article class="rank"><b>상차림비</b><strong>${totals.coverQty}개<span>${won(totals.coverAmount)}</span></strong></article>
         </div>
-        <h2 class="done-head">시간대별 주문</h2>
-        <p class="quiet">1분 단위 매출과 주문 건수입니다.</p>
-        ${renderMinutes(orders)}
-        <h2 class="done-head">상세 주문</h2>
-        <button type="button" class="toggle-btn" data-action="toggle-details">${ui.detailsOpen ? "상세 주문 현황 접기" : "상세 주문 현황 보기"}</button>
-        ${ui.detailsOpen ? renderOrderCards(orders) : ""}
         <section class="panel danger-zone">
           <h3>데이터 초기화</h3>
           <p class="quiet" style="margin:8px 0 14px">고른 일차의 접수만 삭제됩니다.</p>
@@ -1055,6 +1108,26 @@
             <article class="rank total"><b>합계</b><strong>${totals.menuQty + totals.coverQty}개<span>${won(totals.revenue)}</span></strong></article>
           </div>
         </section>`;
+    }
+
+    function renderMinutesScreen() {
+      const orders = rangeOrders();
+      return `
+        <h2>시간대별 주문</h2>
+        ${renderHistoryNav()}
+        ${renderRangeFilters()}
+        <p class="quiet">1분 단위 매출과 주문 건수입니다. 20개씩 봅니다.</p>
+        ${renderMinutes(orders)}`;
+    }
+
+    function renderOrdersScreen() {
+      const orders = rangeOrders();
+      return `
+        <h2>상세 주문</h2>
+        ${renderHistoryNav()}
+        ${renderRangeFilters()}
+        <p class="quiet">최신 주문부터 20건씩 봅니다.</p>
+        ${renderOrderCards(orders)}`;
     }
 
     function renderConfirm() {
@@ -1092,7 +1165,8 @@
       const day = activeDay();
       ui.day = day;
       const meta = FESTIVAL_DAYS.find((item) => item.key === day);
-      const ordering = ui.screen !== "stats";
+      const ordering = ui.screen === "order";
+      const history = ordering ? "" : ui.screen === "minutes" ? renderMinutesScreen() : ui.screen === "orders" ? renderOrdersScreen() : renderStatsScreen();
       document.getElementById("app").innerHTML = `
         ${renderHeader()}
         <main class="wrap">
@@ -1102,7 +1176,7 @@
             ${renderMenus()}
             ${renderCart()}
             ${renderNote()}
-          ` : renderStatsScreen()}
+          ` : history}
         </main>
         ${ordering ? renderDock() : ""}
         ${renderConfirm()}`;
@@ -1123,11 +1197,19 @@
         ui.screen = "stats";
         ui.confirm = null;
         render();
+      } else if (action === "open-history") {
+        ui.screen = btn.dataset.screen || "stats";
+        ui.confirm = null;
+        render();
       } else if (action === "set-range") {
         ui.statsRange = btn.dataset.range;
+        ui.minutePage = 0;
+        ui.orderPage = 0;
         render();
-      } else if (action === "toggle-details") {
-        ui.detailsOpen = !ui.detailsOpen;
+      } else if (action === "page") {
+        const delta = Number(btn.dataset.delta) || 0;
+        if (btn.dataset.pageKind === "minute") ui.minutePage += delta;
+        else ui.orderPage += delta;
         render();
       } else if (action === "inc-menu") {
         addLine(btn.dataset.id, btn.dataset.option || "");
