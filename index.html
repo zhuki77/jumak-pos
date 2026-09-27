@@ -209,10 +209,17 @@
     }
     .order:last-child { border-bottom: 0; }
     .text-btn { min-height: 44px; border: 0; background: transparent; color: var(--muted); font-weight: 800; }
-    .danger-zone { margin-top: 22px; }
-    .reset-row { display: flex; gap: 8px; }
     .danger-btn { width: 100%; min-height: 56px; background: transparent; color: #ffd4d4; border: 2px solid var(--red); }
-    .reset-row .danger-btn { flex: 1; padding: 0 8px; }
+    .reset-slot { margin: 10px 0 4px; text-align: right; }
+    .reset-mini {
+      min-height: 32px;
+      padding: 2px 4px;
+      border: 0;
+      background: transparent;
+      color: #8d8080;
+      font-size: .75rem;
+      font-weight: 700;
+    }
     .dock {
       position: fixed;
       left: 0;
@@ -799,14 +806,18 @@
       render();
     }
 
-    function resetDay(day) {
-      localOps = localOps.filter((op) => syncedSet.has(op.id) || op.kind !== "O" || op.day !== day);
-      commit({ kind: "D", id: uid(), day });
-      ui.drafts[day] = [];
-      ui.notes[day] = "";
+    function resetDays(days) {
+      days.forEach((day) => {
+        localOps = localOps.filter((op) => syncedSet.has(op.id) || op.kind !== "O" || op.day !== day);
+        localOps.push({ kind: "D", id: uid(), day });
+        ui.drafts[day] = [];
+        ui.notes[day] = "";
+      });
+      state = replay(localOps);
+      saveLocal();
+      enqueue(() => pushPending());
       ui.confirm = null;
-      const label = dayLabel(day);
-      toast(`${label} 접수를 초기화했습니다.`);
+      toast(days.length > 1 ? "1일차와 2일차 접수를 초기화했습니다." : `${dayLabel(days[0])} 접수를 초기화했습니다.`);
       render();
     }
 
@@ -1095,19 +1106,13 @@
         <div class="ranks">
           <article class="rank"><b>상차림비</b><strong>${totals.coverQty}개<span>${won(totals.coverAmount)}</span></strong></article>
         </div>
-        <section class="panel danger-zone">
-          <h3>데이터 초기화</h3>
-          <p class="quiet" style="margin:8px 0 14px">고른 일차의 접수만 삭제됩니다.</p>
-          <div class="reset-row">
-            ${FESTIVAL_DAYS.map((item) => `<button type="button" class="danger-btn" data-action="ask-reset" data-day="${item.key}">${item.label} 초기화</button>`).join("")}
-          </div>
-        </section>
         <section class="panel total-zone">
           <h2>합계</h2>
           <div class="ranks" style="margin-top:10px">
             <article class="rank total"><b>합계</b><strong>${totals.menuQty + totals.coverQty}개<span>${won(totals.revenue)}</span></strong></article>
           </div>
-        </section>`;
+        </section>
+        <p class="reset-slot"><button type="button" class="reset-mini" data-action="ask-reset" data-range="${esc(ui.statsRange)}">${ui.statsRange === "all" ? "이틀 전체 초기화" : `${esc(dayLabel(ui.statsRange))} 초기화`}</button></p>`;
     }
 
     function renderMinutesScreen() {
@@ -1268,15 +1273,26 @@
         };
         render();
       } else if (action === "ask-reset") {
-        const day = FESTIVAL_DAYS.find((item) => item.key === btn.dataset.day);
-        if (!day) return;
-        ui.confirm = {
-          title: `${day.label} 초기화`,
-          message: `${day.label} 접수만 삭제됩니다. 다른 일차는 그대로 남고, 삭제한 데이터는 되돌릴 수 없습니다.`,
-          yes: `${day.label} 삭제`,
-          danger: true,
-          run: () => resetDay(day.key)
-        };
+        const range = btn.dataset.range;
+        if (range === "all") {
+          ui.confirm = {
+            title: "이틀 전체 초기화",
+            message: "1일차와 2일차 접수가 모두 삭제됩니다. 삭제한 데이터는 되돌릴 수 없습니다.",
+            yes: "이틀 전체 삭제",
+            danger: true,
+            run: () => resetDays(FESTIVAL_DAYS.map((item) => item.key))
+          };
+        } else {
+          const day = FESTIVAL_DAYS.find((item) => item.key === range);
+          if (!day) return;
+          ui.confirm = {
+            title: `${day.label} 초기화`,
+            message: `${day.label} 접수만 삭제됩니다. 다른 일차는 그대로 남고, 삭제한 데이터는 되돌릴 수 없습니다.`,
+            yes: `${day.label} 삭제`,
+            danger: true,
+            run: () => resetDays([day.key])
+          };
+        }
         render();
       } else if (action === "confirm-no") {
         ui.confirm = null;
