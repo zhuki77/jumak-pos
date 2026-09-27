@@ -968,7 +968,7 @@
       const day = activeDay();
       return `
         <label class="note-field">
-          요청사항
+          상세설명
           <textarea data-note maxlength="80" placeholder="없으면 비워 두세요">${esc(ui.notes[day] || "")}</textarea>
         </label>`;
     }
@@ -1081,7 +1081,7 @@
               <strong>[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} - ${esc(hhmm(order.at))}</strong>
             </div>
             <ul>${order.items.map((item) => `<li>${esc(itemLabel(item))} ${item.qty}개 · ${won(item.amount)}</li>`).join("")}</ul>
-            ${order.note ? `<p>요청사항: ${esc(order.note)}</p>` : `<p class="quiet">요청사항 없음</p>`}
+            ${order.note ? `<p>상세설명: ${esc(order.note)}</p>` : `<p class="quiet">상세설명 없음</p>`}
             <div class="order-sum"><b>총금액 ${won(order.total)}</b>
               <button type="button" class="text-btn" data-action="ask-cancel" data-id="${esc(order.id)}">주문 취소</button>
             </div>
