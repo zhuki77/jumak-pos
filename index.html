@@ -167,7 +167,9 @@
     .order:last-child { border-bottom: 0; }
     .text-btn { min-height: 44px; border: 0; background: transparent; color: var(--muted); font-weight: 800; }
     .danger-zone { margin-top: 22px; }
+    .reset-row { display: flex; gap: 8px; }
     .danger-btn { width: 100%; min-height: 56px; background: transparent; color: #ffd4d4; border: 2px solid var(--red); }
+    .reset-row .danger-btn { flex: 1; padding: 0 8px; }
     .dock {
       position: fixed;
       left: 0;
@@ -340,6 +342,12 @@
           orders.length = 0;
           return;
         }
+        if (op.kind === "D") {
+          for (let i = orders.length - 1; i >= 0; i--) {
+            if (orders[i].day === op.day) orders.splice(i, 1);
+          }
+          return;
+        }
         if (op.kind === "O") {
           const items = (op.items || []).map(hydrate);
           orders.push({
@@ -461,6 +469,7 @@
         return ["O", op.day, op.at, items].join("|");
       }
       if (op.kind === "X") return ["X", op.orderId].join("|");
+      if (op.kind === "D") return ["D", op.day].join("|");
       if (op.kind === "R") return ["R", op.epoch].join("|");
       return "";
     }
@@ -480,6 +489,7 @@
         return { kind: "O", day: parts[1], at: Number(parts[2]) || 0, items };
       }
       if (parts[0] === "X") return { kind: "X", orderId: parts[1] };
+      if (parts[0] === "D") return { kind: "D", day: parts[1] };
       if (parts[0] === "R") return { kind: "R", epoch: Number(parts[1]) || 0 };
       return null;
     }
@@ -693,12 +703,13 @@
       render();
     }
 
-    function resetAll() {
-      localOps = localOps.filter((op) => syncedSet.has(op.id));
-      commit({ kind: "R", id: uid(), epoch: Date.now() });
-      ui.drafts = { "2026-10-01": [], "2026-10-02": [] };
+    function resetDay(day) {
+      localOps = localOps.filter((op) => syncedSet.has(op.id) || op.kind !== "O" || op.day !== day);
+      commit({ kind: "D", id: uid(), day });
+      ui.drafts[day] = [];
       ui.confirm = null;
-      toast("전체 데이터를 초기화했습니다.");
+      const label = FESTIVAL_DAYS.find((item) => item.key === day).label;
+      toast(`${label} 접수를 초기화했습니다.`);
       render();
     }
 
@@ -820,21 +831,30 @@
             <article class="rank"><b>${esc(row.label)}</b><strong>${row.qty}개<span>${won(row.amount)}</span></strong></article>
           `).join("")}</div>`;
       }).join("");
-      const cover = counts.get(lineKey(COVER_ID, "")) || { qty: 0, amount: 0 };
-      const coverRow = `
-        <h3 class="done-head">상차림비</h3>
-        <div class="ranks">
-          <article class="rank"><b>상차림비</b><strong>${cover.qty}개<span>${won(cover.amount)}</span></strong></article>
-        </div>`;
       const orders = ordersOn(day);
-      const qty = orders.reduce((sum, order) => sum + order.items.reduce((itemSum, item) => itemSum + item.qty, 0), 0);
-      const total = orders.reduce((sum, order) => sum + order.total, 0);
+      let menuQty = 0;
+      let menuAmount = 0;
+      let coverQty = 0;
+      let coverAmount = 0;
+      orders.forEach((order) => {
+        order.items.forEach((item) => {
+          if (item.menuId === COVER_ID) {
+            coverQty += item.qty;
+            coverAmount += item.amount;
+            return;
+          }
+          menuQty += item.qty;
+          menuAmount += item.amount;
+        });
+      });
       return `
         <h2 class="done-head">메뉴별 판매</h2>
         ${rows}
-        ${coverRow}
         <div class="ranks" style="margin-top:10px">
-          <article class="rank total"><b>합계</b><strong>${qty}개<span>${won(total)}</span></strong></article>
+          <article class="rank total"><b>합계</b><strong>${menuQty}개<span>${won(menuAmount)}</span></strong></article>
+        </div>
+        <div class="ranks" style="margin-top:10px">
+          <article class="rank total"><b>상차림비</b><strong>${coverQty}개<span>${won(coverAmount)}</span></strong></article>
         </div>`;
     }
 
@@ -900,8 +920,10 @@
           ${renderOrders(day)}
           <section class="panel danger-zone">
             <h3>데이터 초기화</h3>
-            <p class="quiet" style="margin:8px 0 14px">1일차와 2일차 접수가 모두 삭제됩니다.</p>
-            <button type="button" class="danger-btn" data-action="ask-reset">전체 초기화</button>
+            <p class="quiet" style="margin:8px 0 14px">고른 일차의 접수만 삭제됩니다.</p>
+            <div class="reset-row">
+              ${FESTIVAL_DAYS.map((item) => `<button type="button" class="danger-btn" data-action="ask-reset" data-day="${item.key}">${item.label} 초기화</button>`).join("")}
+            </div>
           </section>
         </main>
         ${renderDock()}
@@ -969,12 +991,14 @@
         };
         render();
       } else if (action === "ask-reset") {
+        const day = FESTIVAL_DAYS.find((item) => item.key === btn.dataset.day);
+        if (!day) return;
         ui.confirm = {
-          title: "전체 초기화",
-          message: "1일차와 2일차 접수가 모두 삭제됩니다. 삭제한 데이터는 되돌릴 수 없습니다.",
-          yes: "전체 삭제",
+          title: `${day.label} 초기화`,
+          message: `${day.label} 접수만 삭제됩니다. 다른 일차는 그대로 남고, 삭제한 데이터는 되돌릴 수 없습니다.`,
+          yes: `${day.label} 삭제`,
           danger: true,
-          run: resetAll
+          run: () => resetDay(day.key)
         };
         render();
       } else if (action === "confirm-no") {
