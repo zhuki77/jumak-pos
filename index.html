@@ -194,6 +194,17 @@
     }
     .pager button:disabled { opacity: .35; }
     .pager span { font-weight: 800; font-variant-numeric: tabular-nums; }
+    .status-row { display: flex; gap: 8px; }
+    .status-btn {
+      flex: 1;
+      min-height: 48px;
+      border: 2px solid var(--line);
+      border-radius: 12px;
+      background: #1a2030;
+      font-weight: 800;
+    }
+    .status-btn.cook.on { background: var(--orange); color: var(--orange-ink); border-color: var(--orange); }
+    .status-btn.done.on { background: #2f9e6b; color: #04140c; border-color: #3dcc8a; }
     .order-card { display: grid; gap: 8px; }
     .order-head, .order-sum { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
     .order-card ul { margin: 0; padding-left: 18px; }
@@ -412,9 +423,13 @@
             at: op.at,
             seq: op.seq || 0,
             note: op.note || "",
+            status: "",
             items,
             total: items.reduce((sum, item) => sum + (item.amount || 0), 0)
           });
+        } else if (op.kind === "S") {
+          const order = orders.find((item) => item.id === op.orderId);
+          if (order && (op.status === "cook" || op.status === "done" || op.status === "")) order.status = op.status;
         } else if (op.kind === "X") {
           const index = orders.findIndex((order) => order.id === op.orderId);
           if (index >= 0) orders.splice(index, 1);
@@ -547,6 +562,7 @@
         if (op.seq || op.note) return ["O2", op.day, op.at, op.seq || 0, encodeNote(op.note), items].join("|");
         return ["O", op.day, op.at, items].join("|");
       }
+      if (op.kind === "S") return ["S", op.orderId, op.status || ""].join("|");
       if (op.kind === "X") return ["X", op.orderId].join("|");
       if (op.kind === "D") return ["D", op.day].join("|");
       if (op.kind === "R") return ["R", op.epoch].join("|");
@@ -568,6 +584,7 @@
       if (parts[0] === "O") {
         return { kind: "O", day: parts[1], at: Number(parts[2]) || 0, seq: 0, note: "", items: parseItems(parts.slice(3).join("|")) };
       }
+      if (parts[0] === "S") return { kind: "S", orderId: parts[1], status: parts[2] || "" };
       if (parts[0] === "X") return { kind: "X", orderId: parts[1] };
       if (parts[0] === "D") return { kind: "D", day: parts[1] };
       if (parts[0] === "R") return { kind: "R", epoch: Number(parts[1]) || 0 };
@@ -796,6 +813,14 @@
       ui.confirm = null;
       const total = items.reduce((sum, item) => sum + item.amount, 0);
       toast(`${dayLabel(day)}에 ${won(total)}을 접수했습니다.`);
+      render();
+    }
+
+    function setStatus(orderId, status) {
+      const order = state.orders.find((item) => item.id === orderId);
+      if (!order) return;
+      const next = order.status === status ? "" : status;
+      commit({ kind: "S", id: uid(), orderId, status: next });
       render();
     }
 
@@ -1082,6 +1107,10 @@
             </div>
             <ul>${order.items.map((item) => `<li>${esc(itemLabel(item))} ${item.qty}개 · ${won(item.amount)}</li>`).join("")}</ul>
             ${order.note ? `<p>상세설명: ${esc(order.note)}</p>` : `<p class="quiet">상세설명 없음</p>`}
+            <div class="status-row" role="group" aria-label="조리 상태">
+              <button type="button" class="status-btn cook ${order.status === "cook" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-status="cook" aria-pressed="${order.status === "cook"}">조리중</button>
+              <button type="button" class="status-btn done ${order.status === "done" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-status="done" aria-pressed="${order.status === "done"}">서빙 완료</button>
+            </div>
             <div class="order-sum"><b>총금액 ${won(order.total)}</b>
               <button type="button" class="text-btn" data-action="ask-cancel" data-id="${esc(order.id)}">주문 취소</button>
             </div>
@@ -1262,6 +1291,8 @@
           run: submitOrder
         };
         render();
+      } else if (action === "set-status") {
+        setStatus(btn.dataset.id, btn.dataset.status);
       } else if (action === "ask-cancel") {
         const orderId = btn.dataset.id;
         ui.confirm = {
