@@ -93,6 +93,16 @@
       font-weight: 800;
     }
     .table-grid button.on { background: var(--orange); color: var(--orange-ink); }
+    .table-grid.lookup button {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+      min-height: 56px;
+      padding: 6px 2px;
+    }
+    .table-grid.lookup small { font-size: .72rem; font-weight: 800; color: var(--muted); }
+    .table-grid.lookup button.on small { color: var(--orange-ink); }
     .copy-btn, .primary, .pay, .ghost, .danger-btn, .zero, .list-btn, .menu-main, .stepper button {
       border: 0;
       border-radius: 12px;
@@ -106,6 +116,7 @@
       color: var(--orange-ink);
     }
     .list-btn { background: #2a3140; color: var(--text); }
+    .list-btn.on { background: var(--orange); color: var(--orange-ink); }
     main.wrap { padding: 16px 0 120px; }
     h2 { font-size: 1.25rem; }
     .quiet, .desc { color: var(--muted); }
@@ -171,17 +182,15 @@
     .total-zone { margin-top: 28px; }
     .filters { display: flex; gap: 8px; margin-top: 8px; }
     .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
-    .summary article, .minute, .order-card {
+    .summary article, .order-card {
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: 18px;
       padding: 14px;
     }
-    .summary span, .minute span { color: var(--muted); font-size: .82rem; font-weight: 800; }
+    .summary span { color: var(--muted); font-size: .82rem; font-weight: 800; }
     .summary strong { display: block; margin-top: 6px; font-size: 1.35rem; }
-    .minute-list, .order-list { display: grid; gap: 10px; }
-    .minute { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-    .minute b { font-size: 1.05rem; }
+    .order-list { display: grid; gap: 10px; }
     .note-field { display: grid; gap: 8px; margin-top: 14px; font-weight: 800; }
     .note-field textarea {
       min-height: 76px;
@@ -353,7 +362,8 @@
       optionFor: "",
       screen: "order",
       statsRange: "all",
-      minutePage: 0,
+      tableFocus: 1,
+      tablePage: 0,
       orderPage: 0,
       drafts: { "2026-10-01": [], "2026-10-02": [] },
       notes: { "2026-10-01": "", "2026-10-02": "" },
@@ -1102,7 +1112,7 @@
     function renderHistoryNav() {
       const pages = [
         { id: "stats", label: "통계" },
-        { id: "minutes", label: "시간대별" },
+        { id: "tables", label: "테이블별" },
         { id: "orders", label: "상세 주문" }
       ];
       return `
@@ -1145,37 +1155,22 @@
         </div>`;
     }
 
-    function minuteRows(orders) {
-      const groups = new Map();
-      orders.forEach((order) => {
-        const stamp = hhmm(order.at);
-        const key = ui.statsRange === "all" ? `${order.day} ${stamp}` : stamp;
-        const prev = groups.get(key) || { label: ui.statsRange === "all" ? `${dayLabel(order.day)} ${stamp}` : stamp, count: 0, amount: 0, sort: `${order.day} ${stamp}` };
-        prev.count += 1;
-        prev.amount += order.total;
-        groups.set(key, prev);
-      });
-      return [...groups.values()].sort((a, b) => a.sort.localeCompare(b.sort));
+    function orderTables(order) {
+      return [...new Set((order.tables || []).map(Number).filter((num) => num >= 1 && num <= TABLE_COUNT))];
     }
 
-    function renderMinutes(orders) {
-      const rows = minuteRows(orders);
-      if (!rows.length) return `<p class="quiet">이 구간에 접수한 주문이 없습니다.</p>`;
-      const windowed = pageWindow(rows.length, ui.minutePage);
-      ui.minutePage = windowed.current;
-      const visible = rows.slice(windowed.start, windowed.end);
-      return `
-        <div class="minute-list">${visible.map((row) => `
-          <article class="minute"><b>${esc(row.label)}</b><span>${row.count}건 · ${won(row.amount)}</span></article>
-        `).join("")}</div>
-        ${renderPager("minute", rows.length, windowed.current)}`;
+    function ordersForTable(orders, num) {
+      if (!num) return orders.filter((order) => !orderTables(order).length);
+      return orders.filter((order) => orderTables(order).includes(num));
     }
 
-    function renderOrderCards(orders) {
+    function renderOrderCards(orders, pageKind, emptyText) {
       const list = orders.slice().sort((a, b) => b.at - a.at);
-      if (!list.length) return `<p class="quiet">접수한 주문이 없습니다.</p>`;
-      const windowed = pageWindow(list.length, ui.orderPage);
-      ui.orderPage = windowed.current;
+      if (!list.length) return `<p class="quiet">${esc(emptyText || "접수한 주문이 없습니다.")}</p>`;
+      const page = pageKind === "table" ? ui.tablePage : ui.orderPage;
+      const windowed = pageWindow(list.length, page);
+      if (pageKind === "table") ui.tablePage = windowed.current;
+      else ui.orderPage = windowed.current;
       const visible = list.slice(windowed.start, windowed.end);
       return `
         <div class="order-list">${visible.map((order) => `
@@ -1201,7 +1196,7 @@
               <button type="button" class="text-btn" data-action="ask-cancel" data-id="${esc(order.id)}">주문 취소</button>
             </div>
           </article>`).join("")}</div>
-        ${renderPager("order", list.length, windowed.current)}`;
+        ${renderPager(pageKind === "table" ? "table" : "order", list.length, windowed.current)}`;
     }
 
     function renderStatsScreen() {
@@ -1230,14 +1225,31 @@
         <p class="reset-slot"><button type="button" class="reset-mini" data-action="ask-reset" data-range="${esc(ui.statsRange)}">${ui.statsRange === "all" ? "이틀 전체 초기화" : `${esc(dayLabel(ui.statsRange))} 초기화`}</button></p>`;
     }
 
-    function renderMinutesScreen() {
+    function renderTablesScreen() {
       const orders = rangeOrders();
+      const noneCount = ordersForTable(orders, 0).length;
+      let focus = ui.tableFocus;
+      if (focus === 0 && !noneCount) focus = 1;
+      if (!(focus === 0 || (focus >= 1 && focus <= TABLE_COUNT))) focus = 1;
+      ui.tableFocus = focus;
+      const picked = ordersForTable(orders, focus);
+      const amount = picked.reduce((sum, order) => sum + order.total, 0);
       return `
-        <h2>시간대별 주문</h2>
+        <h2>테이블별 주문</h2>
         ${renderHistoryNav()}
         ${renderRangeFilters()}
-        <p class="quiet">1분 단위 매출과 주문 건수입니다. 20개씩 봅니다.</p>
-        ${renderMinutes(orders)}`;
+        <p class="quiet">테이블을 누르면 그 테이블 주문이 나옵니다. 여러 테이블에 걸린 주문은 해당 테이블마다 보입니다.</p>
+        <div class="table-grid lookup" role="tablist" aria-label="테이블별 주문">
+          ${Array.from({ length: TABLE_COUNT }, (_, index) => {
+            const num = index + 1;
+            const count = ordersForTable(orders, num).length;
+            const on = focus === num;
+            return `<button type="button" data-action="pick-table" data-table="${num}" class="${on ? "on" : ""}" aria-pressed="${on}" aria-label="${num}번 테이블, ${count}건"><b>${num}</b><small>${count}건</small></button>`;
+          }).join("")}
+        </div>
+        ${noneCount ? `<button type="button" class="list-btn ${focus === 0 ? "on" : ""}" data-action="pick-table" data-table="0" style="width:100%;margin-top:8px" aria-pressed="${focus === 0}">테이블 없음 · ${noneCount}건</button>` : ""}
+        <p class="done-head"><b>${focus ? `${focus}번 테이블` : "테이블 없음"}</b> · ${picked.length}건 · ${won(amount)}</p>
+        ${renderOrderCards(picked, "table", "이 테이블 주문이 없습니다.")}`;
     }
 
     function renderOrdersScreen() {
@@ -1247,7 +1259,7 @@
         ${renderHistoryNav()}
         ${renderRangeFilters()}
         <p class="quiet">최신 주문부터 20건씩 봅니다.</p>
-        ${renderOrderCards(orders)}`;
+        ${renderOrderCards(orders, "order")}`;
     }
 
     function renderConfirm() {
@@ -1286,7 +1298,7 @@
       ui.day = day;
       const meta = FESTIVAL_DAYS.find((item) => item.key === day);
       const ordering = ui.screen === "order";
-      const history = ordering ? "" : ui.screen === "minutes" ? renderMinutesScreen() : ui.screen === "orders" ? renderOrdersScreen() : renderStatsScreen();
+      const history = ordering ? "" : ui.screen === "tables" ? renderTablesScreen() : ui.screen === "orders" ? renderOrdersScreen() : renderStatsScreen();
       document.getElementById("app").innerHTML = `
         ${renderHeader()}
         <main class="wrap">
@@ -1324,13 +1336,19 @@
         render();
       } else if (action === "set-range") {
         ui.statsRange = btn.dataset.range;
-        ui.minutePage = 0;
+        ui.tablePage = 0;
         ui.orderPage = 0;
         render();
       } else if (action === "page") {
         const delta = Number(btn.dataset.delta) || 0;
-        if (btn.dataset.pageKind === "minute") ui.minutePage += delta;
+        if (btn.dataset.pageKind === "table") ui.tablePage += delta;
         else ui.orderPage += delta;
+        render();
+      } else if (action === "pick-table") {
+        const num = Number(btn.dataset.table);
+        if (num < 0 || num > TABLE_COUNT) return;
+        ui.tableFocus = num;
+        ui.tablePage = 0;
         render();
       } else if (action === "inc-menu") {
         addLine(btn.dataset.id, btn.dataset.option || "");
