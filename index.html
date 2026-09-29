@@ -1304,7 +1304,7 @@
         <h2>테이블별 주문</h2>
         ${renderHistoryNav()}
         ${renderRangeFilters()}
-        <p class="quiet">테이블을 누르면 그 테이블 주문이 나옵니다. 여러 테이블에 걸린 주문은 해당 테이블마다 보입니다.</p>
+        <p class="quiet">테이블을 누르면 그 테이블 주문이 나옵니다. 주문을 누르면 메뉴가 펼쳐집니다. 여러 테이블에 걸린 주문은 해당 테이블마다 보입니다.</p>
         <div class="table-grid lookup" role="tablist" aria-label="테이블별 주문">
           ${Array.from({ length: TABLE_COUNT }, (_, index) => {
             const num = index + 1;
@@ -1315,7 +1315,7 @@
         </div>
         ${noneCount ? `<button type="button" class="list-btn ${focus === 0 ? "on" : ""}" data-action="pick-table" data-table="0" style="width:100%;margin-top:8px" aria-pressed="${focus === 0}">테이블 없음 · ${noneCount}건</button>` : ""}
         <p class="done-head"><b>${focus ? `${focus}번 테이블` : "테이블 없음"}</b> · ${picked.length}건 · ${won(amount)}</p>
-        ${renderOrderCards(picked, "table", "이 테이블 주문이 없습니다.")}`;
+        ${renderOrderCards(picked, "table", "이 테이블 주문이 없습니다.", true)}`;
     }
 
     function renderOrdersScreen() {
