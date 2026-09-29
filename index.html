@@ -1285,7 +1285,7 @@
         <section class="panel total-zone">
           <h2>합계</h2>
           <div class="ranks" style="margin-top:10px">
-            <article class="rank total"><b>합계</b><strong>${totals.menuQty + totals.coverQty}개<span>${won(totals.revenue)}</span></strong></article>
+            <article class="rank total"><b>합계</b><strong>${totals.count}건<span>${won(totals.revenue)}</span></strong></article>
           </div>
         </section>
         <p class="reset-slot"><button type="button" class="reset-mini" data-action="ask-reset" data-range="${esc(ui.statsRange)}">${ui.statsRange === "all" ? "이틀 전체 초기화" : `${esc(dayLabel(ui.statsRange))} 초기화`}</button></p>`;
