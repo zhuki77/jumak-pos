@@ -194,6 +194,8 @@
     }
     .pager button:disabled { opacity: .35; }
     .pager span { font-weight: 800; font-variant-numeric: tabular-nums; }
+    .item-line { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .item-line:first-child { border-top: 0; padding-top: 0; }
     .status-row { display: flex; gap: 8px; }
     .status-btn {
       flex: 1;
@@ -397,7 +399,8 @@
         option: item.option || "",
         qty: item.qty || 0,
         price: menu ? menu.price : 0,
-        amount: item.amount || 0
+        amount: item.amount || 0,
+        status: ""
       };
     }
 
@@ -423,13 +426,16 @@
             at: op.at,
             seq: op.seq || 0,
             note: op.note || "",
-            status: "",
             items,
             total: items.reduce((sum, item) => sum + (item.amount || 0), 0)
           });
         } else if (op.kind === "S") {
           const order = orders.find((item) => item.id === op.orderId);
-          if (order && (op.status === "cook" || op.status === "done" || op.status === "")) order.status = op.status;
+          const allowed = op.status === "cook" || op.status === "done" || op.status === "";
+          if (order && allowed) {
+            if (Number.isInteger(op.index) && order.items[op.index]) order.items[op.index].status = op.status;
+            else if (op.index == null) order.items.forEach((item) => { item.status = op.status; });
+          }
         } else if (op.kind === "X") {
           const index = orders.findIndex((order) => order.id === op.orderId);
           if (index >= 0) orders.splice(index, 1);
@@ -562,7 +568,7 @@
         if (op.seq || op.note) return ["O2", op.day, op.at, op.seq || 0, encodeNote(op.note), items].join("|");
         return ["O", op.day, op.at, items].join("|");
       }
-      if (op.kind === "S") return ["S", op.orderId, op.status || ""].join("|");
+      if (op.kind === "S") return ["S", op.orderId, op.status || "", op.index].join("|");
       if (op.kind === "X") return ["X", op.orderId].join("|");
       if (op.kind === "D") return ["D", op.day].join("|");
       if (op.kind === "R") return ["R", op.epoch].join("|");
@@ -584,7 +590,10 @@
       if (parts[0] === "O") {
         return { kind: "O", day: parts[1], at: Number(parts[2]) || 0, seq: 0, note: "", items: parseItems(parts.slice(3).join("|")) };
       }
-      if (parts[0] === "S") return { kind: "S", orderId: parts[1], status: parts[2] || "" };
+      if (parts[0] === "S") {
+        const index = parts.length > 3 ? Number(parts[3]) : null;
+        return { kind: "S", orderId: parts[1], status: parts[2] || "", index: Number.isInteger(index) ? index : null };
+      }
       if (parts[0] === "X") return { kind: "X", orderId: parts[1] };
       if (parts[0] === "D") return { kind: "D", day: parts[1] };
       if (parts[0] === "R") return { kind: "R", epoch: Number(parts[1]) || 0 };
@@ -816,11 +825,12 @@
       render();
     }
 
-    function setStatus(orderId, status) {
+    function setStatus(orderId, index, status) {
       const order = state.orders.find((item) => item.id === orderId);
-      if (!order) return;
-      const next = order.status === status ? "" : status;
-      commit({ kind: "S", id: uid(), orderId, status: next });
+      const line = order && order.items[index];
+      if (!line) return;
+      const next = line.status === status ? "" : status;
+      commit({ kind: "S", id: uid(), orderId, status: next, index });
       render();
     }
 
@@ -1105,12 +1115,15 @@
             <div class="order-head">
               <strong>[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} - ${esc(hhmm(order.at))}</strong>
             </div>
-            <ul>${order.items.map((item) => `<li>${esc(itemLabel(item))} ${item.qty}개 · ${won(item.amount)}</li>`).join("")}</ul>
+            <div class="item-list">${order.items.map((item, index) => `
+              <div class="item-line">
+                <div><b>${esc(itemLabel(item))}</b><span class="quiet"> ${item.qty}개 · ${won(item.amount)}</span></div>
+                <div class="status-row" role="group" aria-label="${esc(itemLabel(item))} 조리 상태">
+                  <button type="button" class="status-btn cook ${item.status === "cook" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="cook" aria-pressed="${item.status === "cook"}">조리중</button>
+                  <button type="button" class="status-btn done ${item.status === "done" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="done" aria-pressed="${item.status === "done"}">서빙 완료</button>
+                </div>
+              </div>`).join("")}</div>
             ${order.note ? `<p>상세설명: ${esc(order.note)}</p>` : `<p class="quiet">상세설명 없음</p>`}
-            <div class="status-row" role="group" aria-label="조리 상태">
-              <button type="button" class="status-btn cook ${order.status === "cook" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-status="cook" aria-pressed="${order.status === "cook"}">조리중</button>
-              <button type="button" class="status-btn done ${order.status === "done" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-status="done" aria-pressed="${order.status === "done"}">서빙 완료</button>
-            </div>
             <div class="order-sum"><b>총금액 ${won(order.total)}</b>
               <button type="button" class="text-btn" data-action="ask-cancel" data-id="${esc(order.id)}">주문 취소</button>
             </div>
@@ -1292,7 +1305,7 @@
         };
         render();
       } else if (action === "set-status") {
-        setStatus(btn.dataset.id, btn.dataset.status);
+        setStatus(btn.dataset.id, Number(btn.dataset.index), btn.dataset.status);
       } else if (action === "ask-cancel") {
         const orderId = btn.dataset.id;
         ui.confirm = {
