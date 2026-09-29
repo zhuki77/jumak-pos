@@ -829,10 +829,15 @@
       render();
     }
 
+    function needsKitchen(menuId) {
+      const menu = MENU.find((item) => item.id === menuId);
+      return Boolean(menu) && menu.cat !== "drink" && menu.id !== COVER_ID;
+    }
+
     function setStatus(orderId, index, status) {
       const order = state.orders.find((item) => item.id === orderId);
       const line = order && order.items[index];
-      if (!line) return;
+      if (!line || !needsKitchen(line.menuId)) return;
       const next = line.status === status ? "" : status;
       commit({ kind: "S", id: uid(), orderId, status: next, index });
       render();
@@ -1124,10 +1129,11 @@
                 <b>${esc(itemLabel(item))}</b>
                 <div class="item-meta">
                   <span class="quiet">${item.qty}개 · ${won(item.amount)}</span>
-                <div class="status-row" role="group" aria-label="${esc(itemLabel(item))} 조리 상태">
-                  <button type="button" class="status-btn cook ${item.status === "cook" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="cook" aria-pressed="${item.status === "cook"}">조리중</button>
-                  <button type="button" class="status-btn done ${item.status === "done" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="done" aria-pressed="${item.status === "done"}">서빙 완료</button>
-                </div>
+                  ${needsKitchen(item.menuId) ? `
+                    <div class="status-row" role="group" aria-label="${esc(itemLabel(item))} 조리 상태">
+                      <button type="button" class="status-btn cook ${item.status === "cook" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="cook" aria-pressed="${item.status === "cook"}">조리중</button>
+                      <button type="button" class="status-btn done ${item.status === "done" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="done" aria-pressed="${item.status === "done"}">서빙 완료</button>
+                    </div>` : ""}
                 </div>
               </div>`).join("")}</div>
             ${order.note ? `<p>상세설명: ${esc(order.note)}</p>` : `<p class="quiet">상세설명 없음</p>`}
