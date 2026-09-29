@@ -194,16 +194,20 @@
     }
     .pager button:disabled { opacity: .35; }
     .pager span { font-weight: 800; font-variant-numeric: tabular-nums; }
-    .item-line { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .item-line { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
     .item-line:first-child { border-top: 0; padding-top: 0; }
-    .status-row { display: flex; gap: 8px; }
+    .item-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .item-meta .quiet { white-space: nowrap; }
+    .status-row { display: flex; gap: 6px; flex: none; }
     .status-btn {
-      flex: 1;
-      min-height: 48px;
-      border: 2px solid var(--line);
-      border-radius: 12px;
+      min-height: 30px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
       background: #1a2030;
+      font-size: .75rem;
       font-weight: 800;
+      white-space: nowrap;
     }
     .status-btn.cook.on { background: var(--orange); color: var(--orange-ink); border-color: var(--orange); }
     .status-btn.done.on { background: #2f9e6b; color: #04140c; border-color: #3dcc8a; }
@@ -1117,10 +1121,13 @@
             </div>
             <div class="item-list">${order.items.map((item, index) => `
               <div class="item-line">
-                <div><b>${esc(itemLabel(item))}</b><span class="quiet"> ${item.qty}개 · ${won(item.amount)}</span></div>
+                <b>${esc(itemLabel(item))}</b>
+                <div class="item-meta">
+                  <span class="quiet">${item.qty}개 · ${won(item.amount)}</span>
                 <div class="status-row" role="group" aria-label="${esc(itemLabel(item))} 조리 상태">
                   <button type="button" class="status-btn cook ${item.status === "cook" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="cook" aria-pressed="${item.status === "cook"}">조리중</button>
                   <button type="button" class="status-btn done ${item.status === "done" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="done" aria-pressed="${item.status === "done"}">서빙 완료</button>
+                </div>
                 </div>
               </div>`).join("")}</div>
             ${order.note ? `<p>상세설명: ${esc(order.note)}</p>` : `<p class="quiet">상세설명 없음</p>`}
