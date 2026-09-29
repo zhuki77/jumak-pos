@@ -231,6 +231,33 @@
     .status-btn.done.on { background: #2f9e6b; color: #04140c; border-color: #3dcc8a; }
     .order-card { display: grid; gap: 8px; }
     .order-head, .order-sum { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .order-toggle {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 48px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      text-align: left;
+    }
+    .order-brief { display: grid; gap: 4px; min-width: 0; }
+    .order-fold {
+      flex: none;
+      min-width: 64px;
+      min-height: 36px;
+      padding: 0 10px;
+      border-radius: 10px;
+      background: #2a3140;
+      font-size: .82rem;
+      font-weight: 800;
+      display: grid;
+      place-items: center;
+    }
+    .order-card.open .order-fold { background: var(--orange); color: var(--orange-ink); }
+    .order-body { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
     .order-card ul { margin: 0; padding-left: 18px; }
     .order-card li { margin: 4px 0; }
     .orders { display: grid; gap: 8px; }
@@ -365,6 +392,7 @@
       tableFocus: 1,
       tablePage: 0,
       orderPage: 0,
+      openOrders: new Set(),
       drafts: { "2026-10-01": [], "2026-10-02": [] },
       notes: { "2026-10-01": "", "2026-10-02": "" },
       tables: { "2026-10-01": [], "2026-10-02": [] },
@@ -1164,7 +1192,27 @@
       return orders.filter((order) => orderTables(order).includes(num));
     }
 
-    function renderOrderCards(orders, pageKind, emptyText) {
+    function renderOrderBody(order) {
+      return `
+        <div class="item-list">${order.items.map((item, index) => `
+          <div class="item-line">
+            <b>${esc(itemLabel(item))}</b>
+            <div class="item-meta">
+              <span class="quiet">${item.qty}개 · ${won(item.amount)}</span>
+              ${needsKitchen(item.menuId) ? `
+                <div class="status-row" role="group" aria-label="${esc(itemLabel(item))} 조리 상태">
+                  <button type="button" class="status-btn cook ${item.status === "cook" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="cook" aria-pressed="${item.status === "cook"}">조리중</button>
+                  <button type="button" class="status-btn done ${item.status === "done" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="done" aria-pressed="${item.status === "done"}">서빙 완료</button>
+                </div>` : ""}
+            </div>
+          </div>`).join("")}</div>
+        ${order.note ? `<p>상세설명: ${esc(order.note)}</p>` : `<p class="quiet">상세설명 없음</p>`}
+        <div class="order-sum"><b>총금액 ${won(order.total)}</b>
+          <button type="button" class="text-btn" data-action="ask-cancel" data-id="${esc(order.id)}">주문 취소</button>
+        </div>`;
+    }
+
+    function renderOrderCards(orders, pageKind, emptyText, collapsible) {
       const list = orders.slice().sort((a, b) => b.at - a.at);
       if (!list.length) return `<p class="quiet">${esc(emptyText || "접수한 주문이 없습니다.")}</p>`;
       const page = pageKind === "table" ? ui.tablePage : ui.orderPage;
@@ -1173,29 +1221,30 @@
       else ui.orderPage = windowed.current;
       const visible = list.slice(windowed.start, windowed.end);
       return `
-        <div class="order-list">${visible.map((order) => `
-          <article class="order-card">
-            <div class="order-head">
-              <strong>[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} - ${esc(hhmm(order.at))}</strong>
-              <span class="quiet">${esc(tableText(order.tables))}</span>
-            </div>
-            <div class="item-list">${order.items.map((item, index) => `
-              <div class="item-line">
-                <b>${esc(itemLabel(item))}</b>
-                <div class="item-meta">
-                  <span class="quiet">${item.qty}개 · ${won(item.amount)}</span>
-                  ${needsKitchen(item.menuId) ? `
-                    <div class="status-row" role="group" aria-label="${esc(itemLabel(item))} 조리 상태">
-                      <button type="button" class="status-btn cook ${item.status === "cook" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="cook" aria-pressed="${item.status === "cook"}">조리중</button>
-                      <button type="button" class="status-btn done ${item.status === "done" ? "on" : ""}" data-action="set-status" data-id="${esc(order.id)}" data-index="${index}" data-status="done" aria-pressed="${item.status === "done"}">서빙 완료</button>
-                    </div>` : ""}
+        <div class="order-list">${visible.map((order) => {
+          if (!collapsible) {
+            return `
+              <article class="order-card">
+                <div class="order-head">
+                  <strong>[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} - ${esc(hhmm(order.at))}</strong>
+                  <span class="quiet">${esc(tableText(order.tables))}</span>
                 </div>
-              </div>`).join("")}</div>
-            ${order.note ? `<p>상세설명: ${esc(order.note)}</p>` : `<p class="quiet">상세설명 없음</p>`}
-            <div class="order-sum"><b>총금액 ${won(order.total)}</b>
-              <button type="button" class="text-btn" data-action="ask-cancel" data-id="${esc(order.id)}">주문 취소</button>
-            </div>
-          </article>`).join("")}</div>
+                ${renderOrderBody(order)}
+              </article>`;
+          }
+          const open = ui.openOrders.has(order.id);
+          return `
+            <article class="order-card ${open ? "open" : ""}">
+              <button type="button" class="order-toggle" data-action="toggle-order" data-id="${esc(order.id)}" aria-expanded="${open}" aria-label="[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} ${open ? "접기" : "펼치기"}">
+                <span class="order-brief">
+                  <strong>[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} - ${esc(hhmm(order.at))}</strong>
+                  <span class="quiet">${esc(tableText(order.tables))} · ${won(order.total)}</span>
+                </span>
+                <span class="order-fold">${open ? "접기" : "펼치기"}</span>
+              </button>
+              ${open ? `<div class="order-body">${renderOrderBody(order)}</div>` : ""}
+            </article>`;
+        }).join("")}</div>
         ${renderPager(pageKind === "table" ? "table" : "order", list.length, windowed.current)}`;
     }
 
@@ -1258,8 +1307,8 @@
         <h2>상세 주문</h2>
         ${renderHistoryNav()}
         ${renderRangeFilters()}
-        <p class="quiet">최신 주문부터 20건씩 봅니다.</p>
-        ${renderOrderCards(orders, "order")}`;
+        <p class="quiet">주문을 누르면 메뉴가 펼쳐집니다. 최신 주문부터 20건씩 봅니다.</p>
+        ${renderOrderCards(orders, "order", "", true)}`;
     }
 
     function renderConfirm() {
@@ -1343,6 +1392,11 @@
         const delta = Number(btn.dataset.delta) || 0;
         if (btn.dataset.pageKind === "table") ui.tablePage += delta;
         else ui.orderPage += delta;
+        render();
+      } else if (action === "toggle-order") {
+        const id = btn.dataset.id;
+        if (ui.openOrders.has(id)) ui.openOrders.delete(id);
+        else ui.openOrders.add(id);
         render();
       } else if (action === "pick-table") {
         const num = Number(btn.dataset.table);
