@@ -84,6 +84,15 @@
     }
     .cover-btn.on { box-shadow: inset 0 0 0 2px #1a1008; }
     .cover-btn span { font-size: .86rem; }
+    .table-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 12px 0 4px; }
+    .table-grid button {
+      min-height: 48px;
+      border: 0;
+      border-radius: 12px;
+      background: #2a3140;
+      font-weight: 800;
+    }
+    .table-grid button.on { background: var(--orange); color: var(--orange-ink); }
     .copy-btn, .primary, .pay, .ghost, .danger-btn, .zero, .list-btn, .menu-main, .stepper button {
       border: 0;
       border-radius: 12px;
@@ -212,7 +221,7 @@
     .status-btn.cook.on { background: var(--orange); color: var(--orange-ink); border-color: var(--orange); }
     .status-btn.done.on { background: #2f9e6b; color: #04140c; border-color: #3dcc8a; }
     .order-card { display: grid; gap: 8px; }
-    .order-head, .order-sum { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .order-head, .order-sum { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
     .order-card ul { margin: 0; padding-left: 18px; }
     .order-card li { margin: 4px 0; }
     .orders { display: grid; gap: 8px; }
@@ -301,6 +310,7 @@
   <script>
     const STORAGE_KEY = "jumak-festival-pos-v2";
     const COVER_ID = "cover";
+    const TABLE_COUNT = 15;
     const FESTIVAL_DAYS = [
       { key: "2026-10-01", label: "1일차" },
       { key: "2026-10-02", label: "2일차" }
@@ -347,6 +357,7 @@
       orderPage: 0,
       drafts: { "2026-10-01": [], "2026-10-02": [] },
       notes: { "2026-10-01": "", "2026-10-02": "" },
+      tables: { "2026-10-01": [], "2026-10-02": [] },
       confirm: null
     };
 
@@ -430,6 +441,7 @@
             at: op.at,
             seq: op.seq || 0,
             note: op.note || "",
+            tables: op.tables || [],
             items,
             total: items.reduce((sum, item) => sum + (item.amount || 0), 0)
           });
@@ -569,6 +581,7 @@
     function serialize(op) {
       if (op.kind === "O") {
         const items = op.items.map((item) => [item.menuId, item.qty, item.amount, item.option || ""].join(",")).join(";");
+        if (op.tables) return ["O3", op.day, op.at, op.seq || 0, encodeNote(op.note), op.tables.join(","), items].join("|");
         if (op.seq || op.note) return ["O2", op.day, op.at, op.seq || 0, encodeNote(op.note), items].join("|");
         return ["O", op.day, op.at, items].join("|");
       }
@@ -581,6 +594,17 @@
 
     function parseOp(text) {
       const parts = String(text || "").split("|");
+      if (parts[0] === "O3") {
+        return {
+          kind: "O",
+          day: parts[1],
+          at: Number(parts[2]) || 0,
+          seq: Number(parts[3]) || 0,
+          note: decodeNote(parts[4]),
+          tables: String(parts[5] || "").split(",").map(Number).filter((num) => num >= 1 && num <= TABLE_COUNT),
+          items: parseItems(parts.slice(6).join("|"))
+        };
+      }
       if (parts[0] === "O2") {
         return {
           kind: "O",
@@ -809,10 +833,29 @@
       return found ? found.label : "";
     }
 
+    function currentTables() {
+      const day = activeDay();
+      if (!Array.isArray(ui.tables[day])) ui.tables[day] = [];
+      return ui.tables[day];
+    }
+
+    function tableText(tables) {
+      const nums = [...new Set((tables || []).map(Number).filter((num) => num >= 1 && num <= TABLE_COUNT))].sort((a, b) => a - b);
+      if (!nums.length) return "테이블 없음";
+      return `테이블 ${nums.map((num) => `${num}번`).join(", ")}`;
+    }
+
     function submitOrder() {
       const draft = currentDraft().filter((line) => line.qty > 0);
       if (!draft.length) return;
       const day = activeDay();
+      const tables = currentTables().slice().sort((a, b) => a - b);
+      if (!tables.length) {
+        toast("테이블을 골라 주세요.");
+        ui.confirm = null;
+        render();
+        return;
+      }
       const items = draft.map((line) => ({
         menuId: line.menuId,
         qty: line.qty,
@@ -820,9 +863,10 @@
         option: line.option || ""
       }));
       const note = String(ui.notes[day] || "").trim().slice(0, 80);
-      commit({ kind: "O", id: uid(), day, at: Date.now(), seq: nextSeq(day), note, items });
+      commit({ kind: "O", id: uid(), day, at: Date.now(), seq: nextSeq(day), note, tables, items });
       ui.drafts[day] = [];
       ui.notes[day] = "";
+      ui.tables[day] = [];
       ui.confirm = null;
       const total = items.reduce((sum, item) => sum + item.amount, 0);
       toast(`${dayLabel(day)}에 ${won(total)}을 접수했습니다.`);
@@ -856,6 +900,7 @@
         localOps.push({ kind: "D", id: uid(), day });
         ui.drafts[day] = [];
         ui.notes[day] = "";
+        ui.tables[day] = [];
       });
       state = replay(localOps);
       saveLocal();
@@ -1008,6 +1053,20 @@
         <div class="menus">${menus}</div>`;
     }
 
+    function renderTables() {
+      const picked = currentTables();
+      return `
+        <h2 class="done-head">테이블</h2>
+        <p class="quiet">여러 테이블을 함께 고를 수 있습니다.</p>
+        <div class="table-grid" role="group" aria-label="테이블">
+          ${Array.from({ length: TABLE_COUNT }, (_, index) => {
+            const num = index + 1;
+            const on = picked.includes(num);
+            return `<button type="button" data-action="toggle-table" data-table="${num}" class="${on ? "on" : ""}" aria-pressed="${on}" aria-label="${num}번 테이블">${num}</button>`;
+          }).join("")}
+        </div>`;
+    }
+
     function renderNote() {
       const day = activeDay();
       return `
@@ -1123,6 +1182,7 @@
           <article class="order-card">
             <div class="order-head">
               <strong>[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} - ${esc(hhmm(order.at))}</strong>
+              <span class="quiet">${esc(tableText(order.tables))}</span>
             </div>
             <div class="item-list">${order.items.map((item, index) => `
               <div class="item-line">
@@ -1233,6 +1293,7 @@
           ${ordering ? `
             <h2>${esc(meta.label)} 주문 입력</h2>
             <p class="quiet">${esc(dayTitle(day))} · 할인은 금액을 고치고, 무료는 0원입니다.</p>
+            ${renderTables()}
             ${renderMenus()}
             ${renderCart()}
             ${renderNote()}
@@ -1307,11 +1368,25 @@
       } else if (action === "list") {
         setAmount(btn.dataset.key, 0, false);
         render();
+      } else if (action === "toggle-table") {
+        const num = Number(btn.dataset.table);
+        if (num < 1 || num > TABLE_COUNT) return;
+        const tables = currentTables();
+        const index = tables.indexOf(num);
+        if (index >= 0) tables.splice(index, 1);
+        else tables.push(num);
+        tables.sort((a, b) => a - b);
+        render();
       } else if (action === "ask-submit") {
         const day = FESTIVAL_DAYS.find((item) => item.key === activeDay());
+        const tables = currentTables();
+        if (!tables.length) {
+          toast("테이블을 골라 주세요.");
+          return;
+        }
         ui.confirm = {
           title: `${day.label} 주문 접수`,
-          message: `${won(cartTotal())}으로 접수합니다. 수량은 그대로 집계되고, 입력한 금액이 매출입니다.`,
+          message: `${tableText(tables)} · ${won(cartTotal())}으로 접수합니다. 수량은 그대로 집계되고, 입력한 금액이 매출입니다.`,
           yes: "주문 접수",
           danger: false,
           run: submitOrder
