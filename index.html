@@ -229,6 +229,16 @@
     }
     .status-btn.cook.on { background: var(--orange); color: var(--orange-ink); border-color: var(--orange); }
     .status-btn.done.on { background: #2f9e6b; color: #04140c; border-color: #3dcc8a; }
+    .order-card.served { border-color: #3dcc8a; }
+    .served-mark {
+      justify-self: start;
+      padding: 3px 8px;
+      border-radius: 8px;
+      background: #2f9e6b;
+      color: #04140c;
+      font-size: .75rem;
+      font-weight: 800;
+    }
     .order-card { display: grid; gap: 8px; }
     .order-head, .order-sum { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
     .order-toggle {
@@ -916,6 +926,11 @@
       return Boolean(menu) && menu.cat !== "drink" && menu.id !== COVER_ID;
     }
 
+    function orderFullyServed(order) {
+      const kitchen = (order.items || []).filter((item) => needsKitchen(item.menuId));
+      return kitchen.length > 0 && kitchen.every((item) => item.status === "done");
+    }
+
     function setStatus(orderId, index, status) {
       const order = state.orders.find((item) => item.id === orderId);
       const line = order && order.items[index];
@@ -1233,12 +1248,14 @@
               </article>`;
           }
           const open = ui.openOrders.has(order.id);
+          const served = orderFullyServed(order);
           return `
-            <article class="order-card ${open ? "open" : ""}">
-              <button type="button" class="order-toggle" data-action="toggle-order" data-id="${esc(order.id)}" aria-expanded="${open}" aria-label="[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} ${open ? "접기" : "펼치기"}">
+            <article class="order-card ${open ? "open" : ""} ${served ? "served" : ""}">
+              <button type="button" class="order-toggle" data-action="toggle-order" data-id="${esc(order.id)}" aria-expanded="${open}" aria-label="[${esc(dayLabel(order.day))}] #${esc(orderNo(order))}${served ? " 서빙 완료" : ""} ${open ? "접기" : "펼치기"}">
                 <span class="order-brief">
                   <strong>[${esc(dayLabel(order.day))}] #${esc(orderNo(order))} - ${esc(hhmm(order.at))}</strong>
                   <span class="quiet">${esc(tableText(order.tables))} · ${won(order.total)}</span>
+                  ${served ? `<span class="served-mark">서빙 완료</span>` : ""}
                 </span>
                 <span class="order-fold">${open ? "접기" : "펼치기"}</span>
               </button>
