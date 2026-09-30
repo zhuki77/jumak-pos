@@ -236,6 +236,7 @@
     .status-btn.cook.on { background: var(--orange); color: var(--orange-ink); border-color: var(--orange); }
     .status-btn.done.on { background: #2f9e6b; color: #04140c; border-color: #3dcc8a; }
     .order-card.served { border-color: #3dcc8a; }
+    .order-card.editing { border-color: var(--orange); }
     .served-mark {
       justify-self: start;
       padding: 3px 8px;
@@ -428,7 +429,7 @@
       drafts: { "2026-10-01": [], "2026-10-02": [] },
       notes: { "2026-10-01": "", "2026-10-02": "" },
       tables: { "2026-10-01": [], "2026-10-02": [] },
-      reserve: { day: "", name: "", phone: "", party: 2, time: "", tables: [], note: "" },
+      reserve: { day: "", name: "", phone: "", party: 2, time: "", tables: [], note: "", editId: "" },
       reserveScope: "day",
       confirm: null
     };
@@ -544,6 +545,17 @@
         } else if (op.kind === "Q") {
           const index = reservations.findIndex((item) => item.id === op.reserveId);
           if (index >= 0) reservations.splice(index, 1);
+        } else if (op.kind === "U") {
+          const found = reservations.find((item) => item.id === op.reserveId);
+          if (found) {
+            found.day = op.day;
+            found.name = op.name || "";
+            found.phone = op.phone || "";
+            found.party = op.party || 1;
+            found.time = op.time || "";
+            found.tables = op.tables || [];
+            found.note = op.note || "";
+          }
         }
       });
       return { orders, reservations };
@@ -686,6 +698,9 @@
         return ["P", op.day, op.at, encodeField(op.name, 20), encodeField(op.phone, 13), op.party || 1, encodeField(op.time, 5), (op.tables || []).join(","), encodeNote(op.note)].join("|");
       }
       if (op.kind === "Q") return ["Q", op.reserveId].join("|");
+      if (op.kind === "U") {
+        return ["U", op.reserveId, op.day, encodeField(op.name, 20), encodeField(op.phone, 13), op.party || 1, encodeField(op.time, 5), (op.tables || []).join(","), encodeNote(op.note)].join("|");
+      }
       return "";
     }
 
@@ -736,6 +751,19 @@
         };
       }
       if (parts[0] === "Q") return { kind: "Q", reserveId: parts[1] };
+      if (parts[0] === "U") {
+        return {
+          kind: "U",
+          reserveId: parts[1],
+          day: parts[2],
+          name: decodeNote(parts[3]).slice(0, 20),
+          phone: String(decodeNote(parts[4]) || "").replace(/[^\d]/g, "").slice(0, 13),
+          party: Math.min(30, Math.max(1, Number(parts[5]) || 1)),
+          time: decodeNote(parts[6]).slice(0, 5),
+          tables: String(parts[7] || "").split(",").map(Number).filter((num) => num >= 1 && num <= TABLE_COUNT),
+          note: decodeNote(parts[8] || "").slice(0, 80)
+        };
+      }
       return null;
     }
 
@@ -1094,42 +1122,82 @@
       return ui.reserve.day;
     }
 
-    function submitReserve() {
-      const name = String(ui.reserve.name || "").trim().slice(0, 20);
-      const phone = phoneDigits(ui.reserve.phone);
-      if (!name) {
-        toast("예약자명을 입력해 주세요.");
-        ui.confirm = null;
-        render();
-        return;
-      }
-      if (phone.length < 9) {
-        toast("전화번호를 입력해 주세요.");
-        ui.confirm = null;
-        render();
-        return;
-      }
-      const day = reserveDay();
-      const party = Math.min(30, Math.max(1, Number(ui.reserve.party) || 1));
-      const tables = (ui.reserve.tables || []).slice().sort((a, b) => a - b);
-      commit({
-        kind: "P",
-        id: uid(),
-        day,
-        at: Date.now(),
-        name,
-        phone,
-        party,
-        time: String(ui.reserve.time || "").slice(0, 5),
-        tables,
-        note: String(ui.reserve.note || "").trim().slice(0, 80)
-      });
+    function clearReserveForm() {
+      ui.reserve.editId = "";
       ui.reserve.name = "";
       ui.reserve.phone = "";
       ui.reserve.party = 2;
       ui.reserve.time = "";
       ui.reserve.tables = [];
       ui.reserve.note = "";
+    }
+
+    function reserveDraft() {
+      return {
+        name: String(ui.reserve.name || "").trim().slice(0, 20),
+        phone: phoneDigits(ui.reserve.phone),
+        day: reserveDay(),
+        party: Math.min(30, Math.max(1, Number(ui.reserve.party) || 1)),
+        time: String(ui.reserve.time || "").slice(0, 5),
+        tables: (ui.reserve.tables || []).slice().sort((a, b) => a - b),
+        note: String(ui.reserve.note || "").trim().slice(0, 80)
+      };
+    }
+
+    function submitReserve() {
+      const draft = reserveDraft();
+      if (!draft.name) {
+        toast("예약자명을 입력해 주세요.");
+        ui.confirm = null;
+        render();
+        return;
+      }
+      if (draft.phone.length < 9) {
+        toast("전화번호를 입력해 주세요.");
+        ui.confirm = null;
+        render();
+        return;
+      }
+      const editing = (state.reservations || []).find((item) => item.id === ui.reserve.editId);
+      if (ui.reserve.editId && !editing) {
+        toast("이미 취소된 예약입니다.");
+        clearReserveForm();
+        ui.confirm = null;
+        render();
+        return;
+      }
+      if (editing) {
+        commit({
+          kind: "U",
+          id: uid(),
+          reserveId: editing.id,
+          day: draft.day,
+          name: draft.name,
+          phone: draft.phone,
+          party: draft.party,
+          time: draft.time,
+          tables: draft.tables,
+          note: draft.note
+        });
+        clearReserveForm();
+        ui.confirm = null;
+        toast("예약을 수정했습니다.");
+        render();
+        return;
+      }
+      commit({
+        kind: "P",
+        id: uid(),
+        day: draft.day,
+        at: Date.now(),
+        name: draft.name,
+        phone: draft.phone,
+        party: draft.party,
+        time: draft.time,
+        tables: draft.tables,
+        note: draft.note
+      });
+      clearReserveForm();
       ui.confirm = null;
       toast("예약을 접수했습니다.");
       render();
@@ -1566,6 +1634,7 @@
     function renderReserveScreen() {
       const day = reserveDay();
       const picked = ui.reserve.tables || [];
+      const editing = Boolean((state.reservations || []).find((item) => item.id === ui.reserve.editId));
       const list = (state.reservations || []).filter((item) => ui.reserveScope === "all" || item.day === day).slice().sort((a, b) => {
         const left = a.time || "99:99";
         const right = b.time || "99:99";
@@ -1573,8 +1642,8 @@
         return a.at - b.at;
       });
       return `
-        <h2>예약</h2>
-        <p class="quiet">예약자명과 전화번호를 적고 접수합니다. 다른 기기에도 같이 보입니다.</p>
+        <h2>${editing ? "예약 수정" : "예약"}</h2>
+        <p class="quiet">${editing ? "고친 내용을 저장하면 다른 기기에도 같이 바뀝니다." : "예약자명과 전화번호를 적고 접수합니다. 다른 기기에도 같이 보입니다."}</p>
         <div class="filters" role="tablist" aria-label="예약 일차">
           ${FESTIVAL_DAYS.map((item) => `<button type="button" data-action="reserve-day" data-day="${item.key}" class="${day === item.key ? "on" : ""}">${item.label}</button>`).join("")}
         </div>
@@ -1607,22 +1676,27 @@
         <label class="note-field">메모
           <textarea data-reserve="note" maxlength="80" placeholder="없으면 비워 두세요">${esc(ui.reserve.note || "")}</textarea>
         </label>
-        <button type="button" class="pay" data-action="ask-reserve" style="width:100%;margin-top:14px">예약 접수</button>
+        <button type="button" class="pay" data-action="ask-reserve" style="width:100%;margin-top:14px">${editing ? "수정 저장" : "예약 접수"}</button>
+        ${editing ? `<button type="button" class="ghost" data-action="cancel-edit-reserve" style="width:100%;min-height:52px;margin-top:8px">수정 취소</button>` : ""}
         <h2 class="done-head">${ui.reserveScope === "all" ? "전체 예약" : `${esc(dayLabel(day))} 예약`}</h2>
         <div class="filters" role="tablist" aria-label="예약 목록">
           <button type="button" data-action="reserve-scope" data-scope="day" class="${ui.reserveScope === "day" ? "on" : ""}">이 날</button>
           <button type="button" data-action="reserve-scope" data-scope="all" class="${ui.reserveScope === "all" ? "on" : ""}">이틀 전체</button>
         </div>
         ${list.length ? `<div class="order-list" style="margin-top:12px">${list.map((item) => `
-          <article class="order-card">
+          <article class="order-card ${ui.reserve.editId === item.id ? "editing" : ""}">
             <div class="order-head">
               <strong>${esc(item.name)}</strong>
               <span>${esc(phoneText(item.phone))}</span>
             </div>
             <p>${esc(dayLabel(item.day))} · ${item.time ? esc(item.time) : "시간 미정"} · ${item.party}명 · ${item.tables && item.tables.length ? esc(tableText(item.tables)) : "테이블 미정"}</p>
             ${item.note ? `<p>메모: ${esc(item.note)}</p>` : ""}
+            ${ui.reserve.editId === item.id ? `<p class="quiet">이 예약을 수정하고 있습니다.</p>` : ""}
             <div class="order-sum"><b>${esc(hhmm(item.at))} 접수</b>
-              <button type="button" class="text-btn" data-action="ask-cancel-reserve" data-id="${esc(item.id)}">예약 취소</button>
+              <span style="display:flex;gap:8px;align-items:center">
+                <button type="button" class="list-btn" data-action="edit-reserve" data-id="${esc(item.id)}">수정</button>
+                <button type="button" class="text-btn" data-action="ask-cancel-reserve" data-id="${esc(item.id)}">예약 취소</button>
+              </span>
             </div>
           </article>`).join("")}</div>` : `<p class="quiet" style="margin-top:12px">접수한 예약이 없습니다.</p>`}`;
     }
@@ -1689,25 +1763,42 @@
         ui.reserve.tables.sort((a, b) => a - b);
         render();
       } else if (action === "ask-reserve") {
-        const name = String(ui.reserve.name || "").trim();
-        const phone = phoneDigits(ui.reserve.phone);
-        if (!name) {
+        const draft = reserveDraft();
+        if (!draft.name) {
           toast("예약자명을 입력해 주세요.");
           return;
         }
-        if (phone.length < 9) {
+        if (draft.phone.length < 9) {
           toast("전화번호를 입력해 주세요.");
           return;
         }
-        const day = FESTIVAL_DAYS.find((item) => item.key === reserveDay());
-        const tables = ui.reserve.tables || [];
+        const day = FESTIVAL_DAYS.find((item) => item.key === draft.day);
+        const editing = Boolean(ui.reserve.editId);
         ui.confirm = {
-          title: `${day.label} 예약`,
-          message: `${name} · ${phoneText(phone)} · ${ui.reserve.party}명${ui.reserve.time ? ` · ${ui.reserve.time}` : ""} · ${tables.length ? tableText(tables) : "테이블 미정"}으로 예약합니다.`,
-          yes: "예약 접수",
+          title: editing ? "예약 수정" : `${day.label} 예약`,
+          message: `${draft.name} · ${phoneText(draft.phone)} · ${draft.party}명${draft.time ? ` · ${draft.time}` : ""} · ${draft.tables.length ? tableText(draft.tables) : "테이블 미정"}으로 ${editing ? "수정합니다." : "예약합니다."}`,
+          yes: editing ? "수정 저장" : "예약 접수",
           danger: false,
           run: submitReserve
         };
+        render();
+      } else if (action === "edit-reserve") {
+        const item = (state.reservations || []).find((entry) => entry.id === btn.dataset.id);
+        if (!item) return;
+        ui.reserve.editId = item.id;
+        ui.reserve.day = item.day;
+        ui.reserve.name = item.name;
+        ui.reserve.phone = item.phone;
+        ui.reserve.party = item.party;
+        ui.reserve.time = item.time || "";
+        ui.reserve.tables = (item.tables || []).slice();
+        ui.reserve.note = item.note || "";
+        ui.confirm = null;
+        render();
+        window.scrollTo(0, 0);
+      } else if (action === "cancel-edit-reserve") {
+        clearReserveForm();
+        ui.confirm = null;
         render();
       } else if (action === "ask-cancel-reserve") {
         const reserveId = btn.dataset.id;
