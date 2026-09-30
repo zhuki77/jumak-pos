@@ -445,7 +445,6 @@
       notes: { "2026-10-01": "", "2026-10-02": "" },
       tables: { "2026-10-01": [], "2026-10-02": [] },
       reserve: { day: "", name: "", phone: "", party: 2, time: "", tables: [], note: "" },
-      reserveScope: "day",
       confirm: null
     };
 
@@ -1606,7 +1605,7 @@
     function renderReserveScreen() {
       const day = reserveDay();
       const picked = ui.reserve.tables || [];
-      const list = (state.reservations || []).filter((item) => ui.reserveScope === "all" || item.day === day).slice().sort((a, b) => {
+      const list = (state.reservations || []).filter((item) => item.day === day).slice().sort((a, b) => {
         const left = a.time || "99:99";
         const right = b.time || "99:99";
         if (left !== right) return left.localeCompare(right);
@@ -1648,11 +1647,7 @@
           <textarea data-reserve="note" maxlength="80" placeholder="없으면 비워 두세요">${esc(ui.reserve.note || "")}</textarea>
         </label>
         <button type="button" class="pay" data-action="ask-reserve" style="width:100%;margin-top:14px">예약 접수</button>
-        <h2 class="done-head">${ui.reserveScope === "all" ? "전체 예약" : `${esc(dayLabel(day))} 예약`}</h2>
-        <div class="filters" role="tablist" aria-label="예약 목록">
-          <button type="button" data-action="reserve-scope" data-scope="day" class="${ui.reserveScope === "day" ? "on" : ""}">이 날</button>
-          <button type="button" data-action="reserve-scope" data-scope="all" class="${ui.reserveScope === "all" ? "on" : ""}">이틀 전체</button>
-        </div>
+        <h2 class="done-head">${esc(dayLabel(day))} 예약</h2>
         ${list.length ? `<div class="order-list" style="margin-top:12px">${list.map((item) => `
           <article class="order-card">
             <div class="order-head">
@@ -1714,9 +1709,6 @@
         render();
       } else if (action === "reserve-day") {
         ui.reserve.day = btn.dataset.day;
-        render();
-      } else if (action === "reserve-scope") {
-        ui.reserveScope = btn.dataset.scope === "all" ? "all" : "day";
         render();
       } else if (action === "reserve-party") {
         const next = (Number(ui.reserve.party) || 1) + (Number(btn.dataset.delta) || 0);
