@@ -304,6 +304,17 @@
       color: #04140c;
       border-color: #3dcc8a;
     }
+    .source-tag {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #2a2018;
+      color: var(--orange);
+      font-size: .75rem;
+      vertical-align: 1px;
+    }
+    .source-tag.walk { background: #1a2436; color: #9ec0ff; }
     .danger-btn { width: 100%; min-height: 56px; background: transparent; color: #ffd4d4; border: 2px solid var(--red); }
     .reset-slot { margin: 10px 0 4px; text-align: right; }
     .reset-mini {
@@ -445,7 +456,7 @@
       drafts: { "2026-10-01": [], "2026-10-02": [] },
       notes: { "2026-10-01": "", "2026-10-02": "" },
       tables: { "2026-10-01": [], "2026-10-02": [] },
-      reserve: { day: "", name: "", phone: "", party: 2, time: "", tables: [], note: "", editId: "" },
+      reserve: { day: "", name: "", phone: "", party: 2, time: "", tables: [], note: "", source: "pre", editId: "" },
       confirm: null
     };
 
@@ -555,7 +566,8 @@
             party: op.party || 1,
             time: op.time || "",
             tables: op.tables || [],
-            note: op.note || ""
+            note: op.note || "",
+            source: op.source === "walk" ? "walk" : "pre"
           });
         } else if (op.kind === "Q") {
           const index = reservations.findIndex((item) => item.id === op.reserveId);
@@ -570,6 +582,7 @@
             found.time = op.time || "";
             found.tables = op.tables || [];
             found.note = op.note || "";
+            found.source = op.source === "walk" ? "walk" : "pre";
           }
         } else if (op.kind === "F") {
           const item = reservations.find((entry) => entry.id === op.reserveId);
@@ -713,11 +726,11 @@
       if (op.kind === "D") return ["D", op.day].join("|");
       if (op.kind === "R") return ["R", op.epoch].join("|");
       if (op.kind === "P") {
-        return ["P", op.day, op.at, encodeField(op.name, 20), encodeField(op.phone, 13), op.party || 1, encodeField(op.time, 5), (op.tables || []).join(","), encodeNote(op.note)].join("|");
+        return ["P", op.day, op.at, encodeField(op.name, 20), encodeField(op.phone, 13), op.party || 1, encodeField(op.time, 5), (op.tables || []).join(","), encodeNote(op.note), op.source === "walk" ? "walk" : "pre"].join("|");
       }
       if (op.kind === "Q") return ["Q", op.reserveId].join("|");
       if (op.kind === "U") {
-        return ["U", op.reserveId, op.day, encodeField(op.name, 20), encodeField(op.phone, 13), op.party || 1, encodeField(op.time, 5), (op.tables || []).join(","), encodeNote(op.note)].join("|");
+        return ["U", op.reserveId, op.day, encodeField(op.name, 20), encodeField(op.phone, 13), op.party || 1, encodeField(op.time, 5), (op.tables || []).join(","), encodeNote(op.note), op.source === "walk" ? "walk" : "pre"].join("|");
       }
       if (op.kind === "F") return ["F", op.reserveId].join("|");
       return "";
@@ -766,7 +779,8 @@
           party: Math.min(30, Math.max(1, Number(parts[5]) || 1)),
           time: decodeNote(parts[6]).slice(0, 5),
           tables: String(parts[7] || "").split(",").map(Number).filter((num) => num >= 1 && num <= TABLE_COUNT),
-          note: decodeNote(parts[8] || "").slice(0, 80)
+          note: decodeNote(parts[8] || "").slice(0, 80),
+          source: parts[9] === "walk" ? "walk" : "pre"
         };
       }
       if (parts[0] === "Q") return { kind: "Q", reserveId: parts[1] };
@@ -780,7 +794,8 @@
           party: Math.min(30, Math.max(1, Number(parts[5]) || 1)),
           time: decodeNote(parts[6]).slice(0, 5),
           tables: String(parts[7] || "").split(",").map(Number).filter((num) => num >= 1 && num <= TABLE_COUNT),
-          note: decodeNote(parts[8] || "").slice(0, 80)
+          note: decodeNote(parts[8] || "").slice(0, 80),
+          source: parts[9] === "walk" ? "walk" : "pre"
         };
       }
       if (parts[0] === "F") return { kind: "F", reserveId: parts[1] };
@@ -1150,6 +1165,7 @@
       ui.reserve.time = "";
       ui.reserve.tables = [];
       ui.reserve.note = "";
+      ui.reserve.source = "pre";
     }
 
     function reserveDraft() {
@@ -1160,7 +1176,8 @@
         party: Math.min(30, Math.max(1, Number(ui.reserve.party) || 1)),
         time: String(ui.reserve.time || "").slice(0, 5),
         tables: (ui.reserve.tables || []).slice().sort((a, b) => a - b),
-        note: String(ui.reserve.note || "").trim().slice(0, 80)
+        note: String(ui.reserve.note || "").trim().slice(0, 80),
+        source: ui.reserve.source === "walk" ? "walk" : "pre"
       };
     }
 
@@ -1197,7 +1214,8 @@
           party: draft.party,
           time: draft.time,
           tables: draft.tables,
-          note: draft.note
+          note: draft.note,
+          source: draft.source
         });
         clearReserveForm();
         ui.confirm = null;
@@ -1215,7 +1233,8 @@
         party: draft.party,
         time: draft.time,
         tables: draft.tables,
-        note: draft.note
+        note: draft.note,
+        source: draft.source
       });
       clearReserveForm();
       ui.confirm = null;
@@ -1674,18 +1693,43 @@
       const day = reserveDay();
       const picked = ui.reserve.tables || [];
       const editing = Boolean((state.reservations || []).find((item) => item.id === ui.reserve.editId));
+      const source = ui.reserve.source === "walk" ? "walk" : "pre";
       const list = (state.reservations || []).filter((item) => item.day === day).slice().sort((a, b) => {
         const left = a.time || "99:99";
         const right = b.time || "99:99";
         if (left !== right) return left.localeCompare(right);
         return a.at - b.at;
       });
+      const preList = list.filter((item) => item.source !== "walk");
+      const walkList = list.filter((item) => item.source === "walk");
+      const reserveCards = (items, empty) => items.length ? `<div class="order-list" style="margin-top:12px">${items.map((item) => `
+          <article class="order-card ${ui.reserve.editId === item.id ? "editing" : ""}">
+            <div class="order-head">
+              <strong>${esc(item.name)}<span class="source-tag${item.source === "walk" ? " walk" : ""}">${item.source === "walk" ? "현장" : "사전"}</span></strong>
+              <span>${esc(phoneText(item.phone))}</span>
+            </div>
+            <p>${esc(dayLabel(item.day))} · ${item.time ? esc(item.time) : "시간 미정"} · ${item.party}명 · ${item.tables && item.tables.length ? esc(tableText(item.tables)) : "테이블 미정"}</p>
+            ${item.note ? `<p>메모: ${esc(item.note)}</p>` : ""}
+            ${ui.reserve.editId === item.id ? `<p class="quiet">이 예약을 수정하고 있습니다.</p>` : ""}
+            <div class="order-sum"><b>${esc(hhmm(item.at))} 접수${item.confirmed ? " · 확정" : ""}</b>
+              <span class="reserve-actions">
+                <button type="button" class="list-btn" data-action="edit-reserve" data-id="${esc(item.id)}">수정</button>
+                <button type="button" class="confirm-reserve${item.confirmed ? " on" : ""}" data-action="ask-confirm-reserve" data-id="${esc(item.id)}" ${item.confirmed ? "disabled" : ""} aria-pressed="${item.confirmed ? "true" : "false"}">예약 확정</button>
+                <button type="button" class="text-btn" data-action="ask-cancel-reserve" data-id="${esc(item.id)}">예약 취소</button>
+              </span>
+            </div>
+          </article>`).join("")}</div>` : `<p class="quiet" style="margin-top:12px">${empty}</p>`;
       return `
         <h2>${editing ? "예약 수정" : "예약"}</h2>
         <p class="quiet">${editing ? "고친 내용을 저장하면 다른 기기에도 같이 바뀝니다." : "예약자명과 전화번호를 적고 접수합니다. 다른 기기에도 같이 보입니다."}</p>
         <div class="filters" role="tablist" aria-label="예약 일차">
           ${FESTIVAL_DAYS.map((item) => `<button type="button" data-action="reserve-day" data-day="${item.key}" class="${day === item.key ? "on" : ""}">${item.label}</button>`).join("")}
         </div>
+        <div class="filters" role="tablist" aria-label="예약 종류">
+          <button type="button" data-action="reserve-source" data-source="pre" class="${source === "pre" ? "on" : ""}">사전 예약</button>
+          <button type="button" data-action="reserve-source" data-source="walk" class="${source === "walk" ? "on" : ""}">현장 예약</button>
+        </div>
+        <p class="quiet">사전 예약이 목록 위에 먼저 나옵니다.</p>
         <label class="note-field">예약자명
           <input data-reserve="name" maxlength="20" autocomplete="off" placeholder="이름을 입력하세요" value="${esc(ui.reserve.name || "")}">
         </label>
@@ -1717,24 +1761,10 @@
         </label>
         <button type="button" class="pay" data-action="ask-reserve" style="width:100%;margin-top:14px">${editing ? "수정 저장" : "예약 접수"}</button>
         ${editing ? `<button type="button" class="ghost" data-action="cancel-edit-reserve" style="width:100%;min-height:52px;margin-top:8px">수정 취소</button>` : ""}
-        <h2 class="done-head">${esc(dayLabel(day))} 예약</h2>
-        ${list.length ? `<div class="order-list" style="margin-top:12px">${list.map((item) => `
-          <article class="order-card ${ui.reserve.editId === item.id ? "editing" : ""}">
-            <div class="order-head">
-              <strong>${esc(item.name)}</strong>
-              <span>${esc(phoneText(item.phone))}</span>
-            </div>
-            <p>${esc(dayLabel(item.day))} · ${item.time ? esc(item.time) : "시간 미정"} · ${item.party}명 · ${item.tables && item.tables.length ? esc(tableText(item.tables)) : "테이블 미정"}</p>
-            ${item.note ? `<p>메모: ${esc(item.note)}</p>` : ""}
-            ${ui.reserve.editId === item.id ? `<p class="quiet">이 예약을 수정하고 있습니다.</p>` : ""}
-            <div class="order-sum"><b>${esc(hhmm(item.at))} 접수${item.confirmed ? " · 확정" : ""}</b>
-              <span class="reserve-actions">
-                <button type="button" class="list-btn" data-action="edit-reserve" data-id="${esc(item.id)}">수정</button>
-                <button type="button" class="confirm-reserve${item.confirmed ? " on" : ""}" data-action="ask-confirm-reserve" data-id="${esc(item.id)}" ${item.confirmed ? "disabled" : ""} aria-pressed="${item.confirmed ? "true" : "false"}">예약 확정</button>
-                <button type="button" class="text-btn" data-action="ask-cancel-reserve" data-id="${esc(item.id)}">예약 취소</button>
-              </span>
-            </div>
-          </article>`).join("")}</div>` : `<p class="quiet" style="margin-top:12px">접수한 예약이 없습니다.</p>`}`;
+        <h2 class="done-head">${esc(dayLabel(day))} 사전 예약</h2>
+        ${reserveCards(preList, "사전 예약이 없습니다.")}
+        <h2 class="done-head">${esc(dayLabel(day))} 현장 예약</h2>
+        ${reserveCards(walkList, "현장 예약이 없습니다.")}`;
     }
 
     function render() {
@@ -1782,6 +1812,9 @@
       } else if (action === "reserve-day") {
         ui.reserve.day = btn.dataset.day;
         render();
+      } else if (action === "reserve-source") {
+        ui.reserve.source = btn.dataset.source === "walk" ? "walk" : "pre";
+        render();
       } else if (action === "reserve-party") {
         const next = (Number(ui.reserve.party) || 1) + (Number(btn.dataset.delta) || 0);
         ui.reserve.party = Math.min(30, Math.max(1, next));
@@ -1809,7 +1842,7 @@
         const editing = Boolean(ui.reserve.editId);
         ui.confirm = {
           title: editing ? "예약 수정" : `${day.label} 예약`,
-          message: `${draft.name} · ${phoneText(draft.phone)} · ${draft.party}명${draft.time ? ` · ${draft.time}` : ""} · ${draft.tables.length ? tableText(draft.tables) : "테이블 미정"}으로 ${editing ? "수정합니다." : "예약합니다."}`,
+          message: `${draft.source === "walk" ? "현장 예약" : "사전 예약"} · ${draft.name} · ${phoneText(draft.phone)} · ${draft.party}명${draft.time ? ` · ${draft.time}` : ""} · ${draft.tables.length ? tableText(draft.tables) : "테이블 미정"}으로 ${editing ? "수정합니다." : "예약합니다."}`,
           yes: editing ? "수정 저장" : "예약 접수",
           danger: false,
           run: submitReserve
@@ -1826,6 +1859,7 @@
         ui.reserve.time = item.time || "";
         ui.reserve.tables = (item.tables || []).slice();
         ui.reserve.note = item.note || "";
+        ui.reserve.source = item.source === "walk" ? "walk" : "pre";
         ui.confirm = null;
         render();
         window.scrollTo(0, 0);
