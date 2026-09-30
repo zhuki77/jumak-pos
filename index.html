@@ -287,6 +287,22 @@
     }
     .order:last-child { border-bottom: 0; }
     .text-btn { min-height: 44px; border: 0; background: transparent; color: var(--muted); font-weight: 800; }
+    .reserve-actions { display: flex; align-items: center; gap: 6px; }
+    .confirm-reserve {
+      min-height: 40px;
+      padding: 0 12px;
+      border: 1px solid #3dcc8a;
+      border-radius: 10px;
+      background: #163526;
+      color: #d7ffe9;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .confirm-reserve.on, .confirm-reserve:disabled {
+      background: #2f9e6b;
+      color: #04140c;
+      border-color: #3dcc8a;
+    }
     .danger-btn { width: 100%; min-height: 56px; background: transparent; color: #ffd4d4; border: 2px solid var(--red); }
     .reset-slot { margin: 10px 0 4px; text-align: right; }
     .reset-mini {
@@ -544,6 +560,9 @@
         } else if (op.kind === "Q") {
           const index = reservations.findIndex((item) => item.id === op.reserveId);
           if (index >= 0) reservations.splice(index, 1);
+        } else if (op.kind === "F") {
+          const item = reservations.find((entry) => entry.id === op.reserveId);
+          if (item) item.confirmed = true;
         }
       });
       return { orders, reservations };
@@ -686,6 +705,7 @@
         return ["P", op.day, op.at, encodeField(op.name, 20), encodeField(op.phone, 13), op.party || 1, encodeField(op.time, 5), (op.tables || []).join(","), encodeNote(op.note)].join("|");
       }
       if (op.kind === "Q") return ["Q", op.reserveId].join("|");
+      if (op.kind === "F") return ["F", op.reserveId].join("|");
       return "";
     }
 
@@ -736,6 +756,7 @@
         };
       }
       if (parts[0] === "Q") return { kind: "Q", reserveId: parts[1] };
+      if (parts[0] === "F") return { kind: "F", reserveId: parts[1] };
       return null;
     }
 
@@ -1139,6 +1160,25 @@
       commit({ kind: "Q", id: uid(), reserveId });
       ui.confirm = null;
       toast("예약을 취소했습니다.");
+      render();
+    }
+
+    function confirmReserve(reserveId) {
+      const item = (state.reservations || []).find((entry) => entry.id === reserveId);
+      if (!item) {
+        ui.confirm = null;
+        render();
+        return;
+      }
+      if (item.confirmed) {
+        ui.confirm = null;
+        toast("이미 확정된 예약입니다.");
+        render();
+        return;
+      }
+      commit({ kind: "F", id: uid(), reserveId });
+      ui.confirm = null;
+      toast("예약을 확정했습니다.");
       render();
     }
 
@@ -1621,8 +1661,11 @@
             </div>
             <p>${esc(dayLabel(item.day))} · ${item.time ? esc(item.time) : "시간 미정"} · ${item.party}명 · ${item.tables && item.tables.length ? esc(tableText(item.tables)) : "테이블 미정"}</p>
             ${item.note ? `<p>메모: ${esc(item.note)}</p>` : ""}
-            <div class="order-sum"><b>${esc(hhmm(item.at))} 접수</b>
-              <button type="button" class="text-btn" data-action="ask-cancel-reserve" data-id="${esc(item.id)}">예약 취소</button>
+            <div class="order-sum"><b>${esc(hhmm(item.at))} 접수${item.confirmed ? " · 확정" : ""}</b>
+              <span class="reserve-actions">
+                <button type="button" class="confirm-reserve${item.confirmed ? " on" : ""}" data-action="ask-confirm-reserve" data-id="${esc(item.id)}" ${item.confirmed ? "disabled" : ""} aria-pressed="${item.confirmed ? "true" : "false"}">예약 확정</button>
+                <button type="button" class="text-btn" data-action="ask-cancel-reserve" data-id="${esc(item.id)}">예약 취소</button>
+              </span>
             </div>
           </article>`).join("")}</div>` : `<p class="quiet" style="margin-top:12px">접수한 예약이 없습니다.</p>`}`;
     }
@@ -1707,6 +1750,18 @@
           yes: "예약 접수",
           danger: false,
           run: submitReserve
+        };
+        render();
+      } else if (action === "ask-confirm-reserve") {
+        const reserveId = btn.dataset.id;
+        const item = (state.reservations || []).find((entry) => entry.id === reserveId);
+        if (!item || item.confirmed) return;
+        ui.confirm = {
+          title: "예약 확정",
+          message: `${item.name} · ${phoneText(item.phone)} 예약을 확정하시겠습니까?`,
+          yes: "예약 확정",
+          danger: false,
+          run: () => confirmReserve(reserveId)
         };
         render();
       } else if (action === "ask-cancel-reserve") {
