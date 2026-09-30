@@ -94,6 +94,12 @@
       font-weight: 800;
     }
     .table-grid button.on { background: var(--orange); color: var(--orange-ink); }
+    .table-grid button:disabled {
+      background: #171b24;
+      color: #6e675d;
+      text-decoration: line-through;
+      cursor: not-allowed;
+    }
     .table-grid.lookup button {
       display: flex;
       flex-direction: column;
@@ -1157,6 +1163,30 @@
       return ui.reserve.day;
     }
 
+    function takenTablesFor(day, time, exceptId) {
+      const slot = String(time || "").slice(0, 5);
+      const taken = new Set();
+      if (!/^\d{2}:\d{2}$/.test(slot)) return taken;
+      (state.reservations || []).forEach((item) => {
+        if (!item || item.id === exceptId) return;
+        if (item.day !== day) return;
+        if (String(item.time || "").slice(0, 5) !== slot) return;
+        (item.tables || []).forEach((num) => {
+          const table = Number(num);
+          if (table >= 1 && table <= TABLE_COUNT) taken.add(table);
+        });
+      });
+      return taken;
+    }
+
+    function stripBlockedTables() {
+      const taken = takenTablesFor(reserveDay(), ui.reserve.time, ui.reserve.editId);
+      if (!Array.isArray(ui.reserve.tables)) ui.reserve.tables = [];
+      const removed = ui.reserve.tables.filter((num) => taken.has(num));
+      if (removed.length) ui.reserve.tables = ui.reserve.tables.filter((num) => !taken.has(num));
+      return removed;
+    }
+
     function clearReserveForm() {
       ui.reserve.editId = "";
       ui.reserve.name = "";
@@ -1191,6 +1221,14 @@
       }
       if (draft.phone.length < 9) {
         toast("전화번호를 입력해 주세요.");
+        ui.confirm = null;
+        render();
+        return;
+      }
+      const blocked = draft.tables.filter((num) => takenTablesFor(draft.day, draft.time, ui.reserve.editId).has(num));
+      if (blocked.length) {
+        stripBlockedTables();
+        toast("이 시간에 이미 예약된 테이블은 고를 수 없습니다.");
         ui.confirm = null;
         render();
         return;
@@ -1702,6 +1740,8 @@
       });
       const preList = list.filter((item) => item.source !== "walk");
       const walkList = list.filter((item) => item.source === "walk");
+      const taken = takenTablesFor(day, ui.reserve.time, ui.reserve.editId);
+      const timeLabel = String(ui.reserve.time || "").slice(0, 5);
       const reserveCards = (items, empty) => items.length ? `<div class="order-list" style="margin-top:12px">${items.map((item) => `
           <article class="order-card ${ui.reserve.editId === item.id ? "editing" : ""}">
             <div class="order-head">
@@ -1748,12 +1788,13 @@
           <input data-reserve="time" type="time" value="${esc(ui.reserve.time || "")}">
         </label>
         <h2 class="done-head">테이블</h2>
-        <p class="quiet">정해진 테이블이 있으면 고르세요. 여러 개를 함께 고를 수 있습니다.</p>
+        <p class="quiet" id="table-hint">${timeLabel ? `${esc(timeLabel)}에 이미 예약된 테이블은 고를 수 없습니다.` : "시간을 고르면 그 시각에 잡힌 테이블은 비활성화됩니다."}</p>
         <div class="table-grid" role="group" aria-label="예약 테이블">
           ${Array.from({ length: TABLE_COUNT }, (_, index) => {
             const num = index + 1;
-            const on = picked.includes(num);
-            return `<button type="button" data-action="reserve-table" data-table="${num}" class="${on ? "on" : ""}" aria-pressed="${on}" aria-label="${num}번 테이블">${num}</button>`;
+            const blocked = taken.has(num);
+            const on = !blocked && picked.includes(num);
+            return `<button type="button" data-action="reserve-table" data-table="${num}" class="${on ? "on" : ""}" ${blocked ? "disabled" : ""} aria-pressed="${on}" aria-label="${num}번 테이블${blocked ? ", 이 시간 예약됨" : ""}">${num}</button>`;
           }).join("")}
         </div>
         <label class="note-field">메모
@@ -1811,7 +1852,9 @@
         render();
       } else if (action === "reserve-day") {
         ui.reserve.day = btn.dataset.day;
+        const removed = stripBlockedTables();
         render();
+        if (removed.length) toast("이 시간에 이미 예약된 테이블은 뺐습니다.");
       } else if (action === "reserve-source") {
         ui.reserve.source = btn.dataset.source === "walk" ? "walk" : "pre";
         render();
@@ -1822,6 +1865,10 @@
       } else if (action === "reserve-table") {
         const num = Number(btn.dataset.table);
         if (num < 1 || num > TABLE_COUNT) return;
+        if (takenTablesFor(reserveDay(), ui.reserve.time, ui.reserve.editId).has(num)) {
+          toast("이 시간에 이미 예약된 테이블입니다.");
+          return;
+        }
         if (!Array.isArray(ui.reserve.tables)) ui.reserve.tables = [];
         const index = ui.reserve.tables.indexOf(num);
         if (index >= 0) ui.reserve.tables.splice(index, 1);
@@ -1836,6 +1883,13 @@
         }
         if (draft.phone.length < 9) {
           toast("전화번호를 입력해 주세요.");
+          return;
+        }
+        const blocked = draft.tables.filter((num) => takenTablesFor(draft.day, draft.time, ui.reserve.editId).has(num));
+        if (blocked.length) {
+          stripBlockedTables();
+          toast("이 시간에 이미 예약된 테이블은 고를 수 없습니다.");
+          render();
           return;
         }
         const day = FESTIVAL_DAYS.find((item) => item.key === draft.day);
@@ -2031,7 +2085,24 @@
           const digits = phoneDigits(field.value);
           ui.reserve.phone = digits;
           if (field.value !== digits) field.value = digits;
-        } else if (key === "time") ui.reserve.time = String(field.value || "").slice(0, 5);
+        } else if (key === "time") {
+          ui.reserve.time = String(field.value || "").slice(0, 5);
+          const removed = stripBlockedTables();
+          const taken = takenTablesFor(reserveDay(), ui.reserve.time, ui.reserve.editId);
+          const hint = document.getElementById("table-hint");
+          const slot = String(ui.reserve.time || "").slice(0, 5);
+          if (hint) hint.textContent = slot ? `${slot}에 이미 예약된 테이블은 고를 수 없습니다.` : "시간을 고르면 그 시각에 잡힌 테이블은 비활성화됩니다.";
+          document.querySelectorAll("[data-action='reserve-table']").forEach((tableBtn) => {
+            const num = Number(tableBtn.dataset.table);
+            const blocked = taken.has(num);
+            const on = !blocked && (ui.reserve.tables || []).includes(num);
+            tableBtn.disabled = blocked;
+            tableBtn.classList.toggle("on", on);
+            tableBtn.setAttribute("aria-pressed", on ? "true" : "false");
+            tableBtn.setAttribute("aria-label", blocked ? `${num}번 테이블, 이 시간 예약됨` : `${num}번 테이블`);
+          });
+          if (removed.length) toast("이 시간에 이미 예약된 테이블은 뺐습니다.");
+        }
         else if (key === "note") ui.reserve.note = String(field.value || "").slice(0, 80);
         return;
       }
